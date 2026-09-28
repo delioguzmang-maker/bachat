@@ -1,0 +1,13 @@
+# Never commit your login session
+*.har
+*.har.txt
+cookies*.txt
+session*
+
+# Downloaded videos
+videos/
+*.mp4
+*.ts
+*.part
+
+__pycache__/
