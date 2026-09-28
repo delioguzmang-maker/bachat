@@ -73,3 +73,41 @@ after a while. When the script says *"cookies expired"*, export a fresh one.
 
 `bachata_colab.ipynb` contains a copy of `bachata_downloader.py`. After you edit the
 script, run `python build_notebook.py` to regenerate the notebook.
+
+---
+
+# Second site: courses & lessons app (`vdance_downloader.py`)
+
+This is a different platform: a JSON API with a login token and a Bunny CDN, where video
+and audio come as separate streams. It needs its own script and notebook. The files above
+for the first site are unchanged.
+
+- **Notebook:** [`vdance_colab.ipynb`](vdance_colab.ipynb). Run the cells from top to bottom:
+  1. Connect Google Drive.
+  2. Upload a HAR file (or paste your token).
+  3. List all courses.
+  4. Choose courses and check the size.
+  5. Download.
+- **Script:** `vdance_downloader.py`.
+
+Files are saved as `Bachata/Advanced - Pablo & Raquel/01 - Hands game and chest isolation.mp4`.
+When a course exists in both English and Spanish, its folder gets `[EN]` or `[ES]`.
+
+The whole catalog is about 110 courses, 1,700 lessons and 400 hours, which is about
+770 GB in 1080p. So choose what to download:
+
+```bash
+python vdance_downloader.py --har app.har --list                        # all courses with ids & hours
+python vdance_downloader.py --har app.har --course 12 --course 40       # specific courses
+python vdance_downloader.py --har app.har --category Bachata --language en --max-height 720
+python vdance_downloader.py --har app.har --artist "Pablo & Raquel"
+python vdance_downloader.py --har app.har --my-courses
+```
+
+Adding `--list` to a selection shows the number of lessons and the estimated size without
+downloading anything. Sizes are about 1.9 GB/hour in 1080p, 0.8 GB/hour in 720p and
+0.45 GB/hour in 540p.
+
+Lessons you already have are skipped, so run it again to resume. You need ffmpeg, which
+merges the video and audio (Colab already has it). After you edit the script, run
+`python build_vdance_notebook.py` to regenerate the notebook.
