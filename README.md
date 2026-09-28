@@ -111,3 +111,35 @@ downloading anything. Sizes are about 1.9 GB/hour in 1080p, 0.8 GB/hour in 720p 
 Lessons you already have are skipped, so run it again to resume. You need ffmpeg, which
 merges the video and audio (Colab already has it). After you edit the script, run
 `python build_vdance_notebook.py` to regenerate the notebook.
+
+---
+
+# Tercer sitio: grabaciones de clases Matterhorn / Opencast DCE (`dce_downloader.py`)
+
+- **Notebook:** [`dce_colab.ipynb`](dce_colab.ipynb). Está en español; ejecuta las celdas de arriba hacia abajo.
+- **Script:** `dce_downloader.py`.
+
+Crea una carpeta por curso en Drive y guarda cada clase con su número y su fecha:
+`Clases/GOVT E-1280 - Government and Politics of China/L01 - 2026-09-02 - Lecture - Pantalla.mp4`.
+Hay un archivo `- Presentador.mp4` con la cámara del profesor, la transcripción en `.txt`/`.vtt`
+y un `Indice de videos.csv`.
+
+- **Máxima resolución:** pantalla en 1920x1080 y presentador en 1280x720. Cada URL se verifica
+  comprobando que el tamaño en el CDN es exactamente el del track de mayor resolución, y después
+  de la descarga se comprueba el MD5.
+- **Video del presentador:** el JSON del sitio no incluye las URLs de los mp4. Las miniaturas
+  del presentador sí apuntan (`ref`) al track de máxima resolución, y ese id es la carpeta del
+  CDN donde está el mp4. El nombre del mp4 se obtiene del nombre de la miniatura.
+- **Transcripción:** usa los subtítulos del sitio si el sitio publica su URL. Si no, usa Whisper.
+  Conviene activar la GPU T4 en Colab.
+- **Reanudación:** lo que ya está descargado se salta y las descargas cortadas se reanudan.
+- **Sin inicio de sesión:** estas grabaciones son públicas (`ROLE_ANONYMOUS`).
+
+```bash
+python dce_downloader.py --list-courses --term 202701                   # ver cursos e IDs
+python dce_downloader.py --course 20270117541 --out Clases              # descargar
+python dce_downloader.py --course "GOVT E-1280" --term 202701 --list    # solo mostrar
+python dce_downloader.py --course 20270117541 --views presenter         # solo el presentador
+```
+
+Si editas el script, ejecuta `python build_dce_notebook.py` para regenerar el notebook.
