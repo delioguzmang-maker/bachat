@@ -143,3 +143,52 @@ python dce_downloader.py --course 20270117541 --views presenter         # solo e
 ```
 
 Si editas el script, ejecuta `python build_dce_notebook.py` para regenerar el notebook.
+
+---
+
+# Cuarto: clases explicadas en español sencillo + Audio Overview (`simplificador_clases.py`)
+
+Usa las transcripciones `.txt` (en inglés) que deja `dce_downloader.py`. Para cada clase de cada curso:
+
+1. Divide la transcripción en fragmentos de ~15.000 caracteres (unos 20 minutos de clase) y pasa cada
+   fragmento por los 7 subagentes del *Topic Simplifier Agent* y por el agente principal, **en orden**:
+   Deep Researcher → Concept Analyzer → Contextualizer → Analogy Creator → Jargon Buster →
+   agente principal (síntesis) → Format Enforcer → Vocabulary Checker.
+   Cada paso es una llamada al asistente de Gemini Enterprise (`streamAssist`) con las instrucciones
+   de ese subagente y lo que entregaron los pasos anteriores.
+2. Guarda la explicación final: `Clases/<curso>/L01 - 2026-01-27 - Lecture_simplificado_es.txt`.
+3. Crea el cuaderno `HIST E-1900 · L01 - 2026-01-27 - Lecture` en Gemini Notebook (NotebookLM Enterprise)
+   con 2 fuentes (transcripción + explicación) y pide el Audio Overview en español.
+
+- **Notebook:** [`simplificador_colab.ipynb`](simplificador_colab.ipynb). Está en español; ejecuta las
+  celdas de arriba hacia abajo. Necesita dos inicios de sesión: Drive (la cuenta de las clases) y
+  `gcloud auth login` (la cuenta de Gemini Enterprise). El proyecto, la ubicación y la app se detectan solos.
+- **Script:** `simplificador_clases.py`.
+
+**Por qué no se llama directamente al agente del diseñador de agentes:** por la API, el agente
+principal le pasa la clase a un solo subagente (el Deep Researcher), y la respuesta de ese subagente es la que vuelve.
+Por eso salían "Informes de Investigación Profunda". Aquí el script hace de orquestador y llama a
+cada subagente. Lo que entrega cada uno queda en `Clases/_simplificador/pasos/<curso>/<clase>/`
+(`b01_1_deep_researcher.md` … `b01_8_vocabulary_checker.md`). Las instrucciones se pueden editar en
+`Clases/_simplificador/instrucciones_agentes.json`.
+
+**Audio Overview:** la API pide `{"generationOptions": {"episodeFocus": ..., "languageCode": "es"}}`.
+Si `languageCode` va fuera de `generationOptions`, responde 400 *Unknown name "languageCode"*.
+Hay un solo audio por cuaderno, y no se puede descargar por la API: aparece en el panel *Studio*.
+
+- **Reanudación:** cada paso se guarda en Drive. Si Colab se corta, vuelve a ejecutar y sigue donde quedó.
+- **Explicaciones viejas:** si un `_simplificado_es.txt` es un informe o tiene listas, se rehace solo.
+  La versión anterior se guarda en `_simplificador/pasos`.
+- **Cupo de audio:** si se acaba el cupo diario, las explicaciones y los cuadernos se siguen haciendo, y los
+  audios que falten se piden en la siguiente ejecución.
+- **Cuadernos repetidos** de pruebas anteriores: `--limpiar` los lista, y `--limpiar --borrar` los borra.
+
+```bash
+python simplificador_clases.py --carpeta /content/drive/MyDrive/Clases --probar        # comprobar conexión
+python simplificador_clases.py --carpeta /content/drive/MyDrive/Clases --max-clases 1  # una clase de prueba
+python simplificador_clases.py --carpeta /content/drive/MyDrive/Clases --max-clases 0  # todas
+python simplificador_clases.py --carpeta ... --solo-curso "HIST E-1900" --sin-audio
+python simplificador_clases.py --carpeta ... --limpiar --borrar
+```
+
+Si editas el script, ejecuta `python build_simplificador_notebook.py` para regenerar el notebook.
