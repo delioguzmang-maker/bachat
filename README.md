@@ -182,6 +182,13 @@ Hay un solo audio por cuaderno, y no se puede descargar por la API: aparece en e
 - **Cupo de audio:** si se acaba el cupo diario, las explicaciones y los cuadernos se siguen haciendo, y los
   audios que falten se piden en la siguiente ejecución.
 - **Cuadernos repetidos** de pruebas anteriores: `--limpiar` los lista, y `--limpiar --borrar` los borra.
+- **Filtro de contenido:** a veces Gemini Enterprise bloquea o corta una respuesta ("This response was
+  blocked by your organization's content policy"). El script lo detecta y reintenta con lenguaje académico
+  neutro. Si no funciona, parte el fragmento en dos, y como último recurso deja una nota en la explicación.
+- **Respuestas de chat:** se quitan los saludos, los comentarios del asistente ("Aquí tienes…", "¿Qué te
+  parece…?"), los emojis y los títulos markdown. Un paso que llegó cortado o bloqueado se rehace, y también los siguientes.
+- **Velocidad:** `--paralelo` (fragmentos de una clase a la vez, 5 por defecto) y `--clases-a-la-vez`.
+  Al detener la celda, se para de verdad y conserva lo hecho.
 
 ```bash
 python simplificador_clases.py --carpeta /content/drive/MyDrive/Clases --probar        # comprobar conexión

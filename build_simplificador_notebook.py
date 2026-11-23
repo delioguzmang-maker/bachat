@@ -81,7 +81,9 @@ def run(args):
 * **CARPETA_CLASES**: la carpeta con una subcarpeta por curso (`Clases` o `clases`, da igual).
 * **PROJECT_ID / PROJECT_NUMBER / APP_ID**: déjalos vacíos y se detectan solos.
 * **SOLO_CURSO**: vacío = todos los cursos. Si escribes, por ejemplo, `HIST E-1900`, solo hace ese curso.
-* **FRAGMENTOS_A_LA_VEZ**: cuántos fragmentos de la clase avanzan a la vez (2 es un buen equilibrio).
+* **FRAGMENTOS_A_LA_VEZ**: cuántos fragmentos de una misma clase avanzan a la vez (5 = una clase entera de ~1,5 h).
+* **CLASES_A_LA_VEZ**: cuántas clases avanzan a la vez. Con 2 va el doble de rápido; si ves muchos
+  avisos `HTTP 429`, bájalo a 1.
 * **BORRAR_CHATS_TEMPORALES**: cada paso crea un chat en tu historial de Gemini Enterprise; si está
   marcado, el notebook los borra al terminar cada paso (no toca tus otros chats).
 """),
@@ -95,12 +97,14 @@ SOLO_CURSO = ""  #@param {type:"string"}
 BUSQUEDA_WEB = True  #@param {type:"boolean"}
 BORRAR_CHATS_TEMPORALES = True  #@param {type:"boolean"}
 FRAGMENTO_CARACTERES = 15000  #@param {type:"integer"}
-FRAGMENTOS_A_LA_VEZ = 2  #@param {type:"integer"}
+FRAGMENTOS_A_LA_VEZ = 5  #@param {type:"integer"}
+CLASES_A_LA_VEZ = 2  #@param {type:"integer"}
 #@markdown Opcional: modelo del asistente (vacío = el de tu app de Gemini Enterprise)
 MODELO = ""  #@param {type:"string"}
 
 BASE = ["--carpeta", CARPETA_CLASES, "--location", UBICACION,
-        "--bloque-chars", str(FRAGMENTO_CARACTERES), "--paralelo", str(FRAGMENTOS_A_LA_VEZ)]
+        "--bloque-chars", str(FRAGMENTO_CARACTERES), "--paralelo", str(FRAGMENTOS_A_LA_VEZ),
+        "--clases-a-la-vez", str(CLASES_A_LA_VEZ)]
 for flag, valor in (("--project-id", PROJECT_ID), ("--project-number", PROJECT_NUMBER),
                     ("--engine-id", APP_ID), ("--solo-curso", SOLO_CURSO), ("--modelo", MODELO)):
     if valor.strip():
@@ -123,7 +127,16 @@ run(BASE + ["--probar"])
 ## 6. Procesar las clases 🚀
 
 * **MAX_CLASES**: empieza con `1` para revisar el resultado. Después pon `0` (= todas).
-  Cada clase de ~1,5 h son unos 5 fragmentos × 8 pasos ≈ 20–40 minutos.
+* **Cómo leer los mensajes**: cada clase se divide en ~5 fragmentos y **cada fragmento** pasa por los
+  8 pasos. Por eso verás `paso 1/8 … paso 8/8` varias veces (una por fragmento): no es un bucle.
+  Cada fragmento terminado dice `fragmento 3/5 terminado (listos: 3 de 5)`.
+* **Tiempo**: una clase de ~1,5 h tarda unos 3–6 minutos. Con cientos de clases son muchas horas:
+  Colab se desconecta a las pocas horas, pero **vuelve a ejecutar esta celda** y sigue donde quedó.
+  Con **SOLO_CURSO** (celda 4) puedes hacer primero el curso que más necesitas.
+* **Para detenerlo**: botón ■ de la celda. Se para al terminar la llamada en curso y todo lo hecho queda guardado.
+* Si el filtro de contenido de Gemini Enterprise bloquea o corta una respuesta (pasa con descripciones
+  de estatuas o temas delicados), se reintenta con lenguaje académico neutro; si aun así no se puede,
+  ese trozo se parte en dos, y como último recurso queda una nota en la explicación.
 * Las clases ya terminadas se saltan. Las explicaciones viejas que eran un “Informe” o tenían
   listas se detectan solas y se rehacen (la versión anterior se guarda en `_simplificador/pasos`).
 * Si se acaba el cupo diario de Audio Overviews, las explicaciones y los cuadernos se siguen haciendo,

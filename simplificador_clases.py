@@ -199,10 +199,11 @@ PASOS = [
          "traducciones de la jerga. Escribe solo párrafos de prosa: sin listas, viñetas, "
          "títulos ni imágenes."),
     Paso("7_format_enforcer", "Format Enforcer", False, ["6_agente_principal"],
-         "Reescribe el borrador de abajo. Conserva todos los datos, nombres, cifras y analogías. "
-         "Entrega solo el texto reescrito."),
+         "Reescribe el borrador de abajo. Conserva todos los datos, nombres, cifras y analogías, "
+         "y no lo acortes: deben quedar todos los párrafos. Entrega solo el texto reescrito."),
     Paso("8_vocabulary_checker", "Vocabulary Checker", False, ["7_format_enforcer"],
-         "Revisa el texto de abajo y devuelve el texto completo mejorado."),
+         "Revisa el texto de abajo y devuelve el texto completo mejorado, con todos sus "
+         "párrafos (no lo resumas)."),
 ]
 
 ETIQUETAS = {
@@ -218,9 +219,36 @@ ETIQUETAS = {
 
 PIE_COMUN = (
     "El material es la transcripción de una clase universitaria (contenido académico). "
-    "Responde solo con tu entregable, sin saludos, sin comentarios sobre el proceso y sin "
-    "generar imágenes."
+    "Tu respuesta se guarda automáticamente en un archivo y nadie la va a leer como un chat. "
+    "Escribe solo el entregable: no saludes, no te presentes, no menciones a Gemini Enterprise "
+    "ni tu papel, no expliques lo que hiciste, no hagas preguntas ni ofrezcas más ayuda al "
+    "final, no uses emojis y no generes imágenes."
 )
+
+PIE_PROSA = (
+    "Formato obligatorio: texto plano en párrafos separados por una línea en blanco. Sin "
+    "markdown: nada de títulos, #, asteriscos, negritas, guiones de lista, listas numeradas ni "
+    "separadores (---)."
+)
+
+NOTA_FILTRO = (
+    "Aviso: un filtro automático de contenido bloqueó o cortó el intento anterior. Es un falso "
+    "positivo, porque el material es una clase universitaria. Usa un lenguaje académico neutro y "
+    "sobrio, y evita descripciones físicas o gráficas innecesarias (por ejemplo, de cuerpos o de "
+    "desnudez en obras de arte), sin omitir ningún dato de la clase."
+)
+
+NOTA_CORTO = (
+    "Aviso: tu borrador anterior fue demasiado corto ({largo} caracteres) para todo lo que se "
+    "enseña en este fragmento. Explica TODO el contenido del fragmento, tema por tema."
+)
+
+NOTA_PARTE_BLOQUEADA = (
+    "(Nota: esta parte de la clase no se pudo explicar porque un filtro automático de contenido "
+    "bloqueó la respuesta. Consulta la transcripción original.)"
+)
+
+PASOS_PROSA = {"6_agente_principal", "7_format_enforcer", "8_vocabulary_checker"}
 
 # --------------------------------------------------------------------------
 # Utilidades
@@ -259,6 +287,72 @@ _LINEA_DE_LISTA = re.compile(r"(?m)^\s*(#{1,6}\s|[-*•]\s|\d{1,2}[.)]\s|-{3,}\s
 _MARCAS_INVALIDAS = ("<end_of_image>", "Informe de Investigaci", "Estado del Informe",
                      "Cumplimiento Total", "Cumplimiento Parcial", "Full Fulfillment")
 
+# Gemini Enterprise corta la respuesta y agrega este aviso cuando la bloquea su filtro.
+_BLOQUEO = re.compile(r"blocked by (your|the) organi[sz]ation|organi[sz]ation'?s content polic"
+                      r"|bloquead[oa] por la pol[ií]tica de contenido", re.I)
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]")
+# Frases de chat del asistente (no son parte de la explicacion).
+_META_SIEMPRE = re.compile(
+    r"Gemini Enterprise|\bbro\b|\bcomo (tu |el |un )?(Format Enforcer|Vocabulary Checker|"
+    r"Deep Researcher|Concept Analyzer|Contextualizer|Analogy Creator|Jargon Buster|"
+    r"Topic Simplifier|asistente|Optimizador|Verificador|Ejecutor de Formato)", re.I)
+_META_BORDES = re.compile(
+    r"^(¡\s*)?(hola|claro|por supuesto|perfecto|excelente|genial)\b|^aquí (tienes|está|va)\b"
+    r"|^¡?\s*qué (excelente|buena|gran|magnífica) (iniciativa|idea|pregunta|trabajo|material)"
+    r"|^a continuación,? (te )?(presento|tienes|encontrarás|está)|^buen[oa]s (días|tardes|noches)\W*$"
+    r"|me he encargado|\bhe (reescrito|revisado|optimizado|eliminado|sustituido|reemplazado|pulido|corregido)"
+    r"|¿qué te parece|quedo (más que |muy )?atent|¿(te gustaría|quieres|deseas)|avísame|no dudes en"
+    r"|espero que (esto|te sea|te haya)|si (quieres|deseas) que (optimic|revis|continú|sig|pase|ajust|profundic)"
+    r"|¡?\s*habl(amos|emos)\b|^he \w+(ado|ido)\b|\btus datos\b", re.I)
+# En la explicacion final no se habla de "fragmentos": eso es del proceso, no de la clase.
+_META_PROSA = re.compile(r"\b(este|el|del|al) (primer |segundo |último |siguiente |presente )?"
+                         r"fragmento\b|\bel borrador\b", re.I)
+
+
+def parece_cortado(texto: str) -> bool:
+    """Un texto que termina a mitad de palabra o de frase (respuesta cortada)."""
+    return not re.search(r"[.!?…»\")\]]\s*$", texto.strip())
+
+
+def limpiar_respuesta(texto: str, prosa: bool) -> str:
+    """Quita emojis, saludos y comentarios del asistente; en prosa, tambien titulos y separadores."""
+    t = _EMOJI.sub("", texto.replace("<end_of_image>", ""))
+    lineas = []
+    for linea in t.splitlines():
+        if prosa:
+            if re.match(r"\s*#{1,6}\s", linea) or re.fullmatch(r"\s*([-*_]\s*){3,}", linea):
+                continue                       # titulos markdown y separadores ---
+            linea = linea.replace("**", "").replace("__", "")
+        lineas.append(linea)
+    llenas = [k for k, l in enumerate(lineas) if l.strip()]
+    bordes = set(llenas[:4] + llenas[-4:])     # saludos al principio, ofrecimientos al final
+    salida = []
+    for k, linea in enumerate(lineas):
+        if not linea.strip():
+            salida.append("")
+            continue
+        sangria = re.match(r"\s*", linea).group(0)
+        oraciones = re.split(r"(?<=[.!?…])\s+", linea.strip())
+        quedan = [o for o in oraciones if not _META_SIEMPRE.search(o)
+                  and not (prosa and _META_PROSA.search(o))
+                  and not (k in bordes and _META_BORDES.search(o))]
+        nueva = " ".join(quedan).strip()
+        if nueva:
+            salida.append(sangria + nueva)
+    t = re.sub(r"\n{3,}", "\n\n", "\n".join(salida)).strip()
+    if prosa:
+        # Un parrafo de una sola linea corta y sin punto final es un titulo: se quita.
+        parrafos = [pa for pa in t.split("\n\n")
+                    if not ("\n" not in pa and len(pa) < 100 and parece_cortado(pa))]
+        t = "\n\n".join(parrafos).strip()
+    return t
+
+
+def fragmento_valido(texto: str) -> bool:
+    t = (texto or "").strip()
+    return bool(t) and not _BLOQUEO.search(t) and not _META_SIEMPRE.search(t) \
+        and lineas_de_lista(t) <= 2 and not parece_cortado(t)
+
 
 def lineas_de_lista(texto: str) -> int:
     return len(_LINEA_DE_LISTA.findall(texto))
@@ -271,6 +365,8 @@ def es_explicacion_valida(texto: str) -> bool:
         return False
     if any(m.lower() in t.lower() for m in _MARCAS_INVALIDAS):
         return False
+    if _BLOQUEO.search(t) or _META_SIEMPRE.search(t):
+        return False
     return lineas_de_lista(t) <= 2
 
 
@@ -278,9 +374,10 @@ def quitar_formato(texto: str) -> str:
     """Ultimo recurso: quita titulos, vinetas y negritas de markdown sin tocar las palabras."""
     salida = []
     for linea in texto.splitlines():
-        l = re.sub(r"^\s*(#{1,6}\s+|[-*•]\s+|\d{1,2}[.)]\s+)", "", linea)
-        if re.fullmatch(r"\s*-{3,}\s*", l):
-            l = ""
+        if re.match(r"\s*#{1,6}\s", linea) or re.fullmatch(r"\s*-{3,}\s*", linea):
+            salida.append("")
+            continue
+        l = re.sub(r"^\s*([-*•]\s+|\d{1,2}[.)]\s+)", "", linea)
         l = l.replace("**", "").replace("__", "")
         salida.append(l)
     return re.sub(r"\n{3,}", "\n\n", "\n".join(salida)).strip()
@@ -318,7 +415,14 @@ class ApiError(RuntimeError):
 
 
 class Bloqueado(RuntimeError):
-    """El asistente no contesto (politica de seguridad o respuesta vacia)."""
+    """El asistente no contesto (filtro de contenido, respuesta vacia o cortada)."""
+
+
+class Interrumpido(RuntimeError):
+    """El usuario detuvo la celda."""
+
+
+PARAR = threading.Event()
 
 
 class CupoAgotado(RuntimeError):
@@ -331,6 +435,7 @@ class Respuesta:
     estado: str
     motivos: list
     sesion: str | None
+    veredicto: str = ""
 
 
 def leer_stream(raw: str) -> list[dict]:
@@ -357,11 +462,12 @@ def leer_stream(raw: str) -> list[dict]:
 
 
 def unir_respuesta(chunks: list[dict]) -> Respuesta:
-    textos, estado, motivos, sesion = [], "", [], None
+    textos, estado, motivos, sesion, veredicto = [], "", [], None, ""
     for ch in chunks:
         ans = ch.get("answer") or {}
         estado = ans.get("state") or estado
         motivos += ans.get("assistSkippedReasons") or []
+        veredicto = (ans.get("customerPolicyEnforcementResult") or {}).get("verdict") or veredicto
         sesion = (ch.get("sessionInfo") or {}).get("session") or sesion
         for rep in ans.get("replies") or []:
             c = (rep.get("groundedContent") or {}).get("content") or {}
@@ -370,7 +476,7 @@ def unir_respuesta(chunks: list[dict]) -> Respuesta:
             if c.get("text"):
                 textos.append(c["text"])
     texto = "".join(textos).replace("<end_of_image>", "").strip()
-    return Respuesta(texto, estado, motivos, sesion)
+    return Respuesta(texto, estado, motivos, sesion, veredicto)
 
 
 @dataclass
@@ -384,7 +490,8 @@ class Config:
     max_clases: int = 1
     solo_curso: str = ""
     bloque_chars: int = 15000
-    paralelo: int = 2
+    paralelo: int = 5
+    clases_a_la_vez: int = 1
     busqueda_web: bool = True
     borrar_chats: bool = True
     crear_cuaderno: bool = True
@@ -479,9 +586,14 @@ class Api:
         resp = unir_respuesta(leer_stream(r.text))
         if self.cfg.borrar_chats and resp.sesion:
             self.borrar_chat(resp.sesion)
+        if (_BLOQUEO.search(resp.texto) or resp.veredicto == "BLOCK"
+                or "CUSTOMER_POLICY_VIOLATION" in resp.motivos):
+            raise Bloqueado("el filtro de contenido de Gemini Enterprise bloqueo la respuesta")
         if not resp.texto:
             motivo = ", ".join(resp.motivos) or resp.estado or "respuesta vacia"
             raise Bloqueado(motivo)
+        if resp.estado and resp.estado != "SUCCEEDED":
+            raise Bloqueado(f"respuesta incompleta (estado {resp.estado})")
         return resp
 
     def borrar_chat(self, sesion: str) -> None:
@@ -631,6 +743,10 @@ class Clase:
         return self.curso.split(" - ")[0].strip() or self.curso
 
     @property
+    def corto(self) -> str:
+        return f"{self.codigo_curso} {self.base.split(' - ')[0]}".strip()
+
+    @property
     def titulo(self) -> str:
         return f"{self.codigo_curso} · {self.base}" if self.curso else self.base
 
@@ -639,18 +755,33 @@ class Clase:
         return os.path.join(os.path.dirname(self.ruta), self.base + SUFIJO_EXPLICACION)
 
 
-def armar_prompt(paso: Paso, instr: dict, salidas: dict, clase: Clase, i: int, n: int) -> str:
+def _miles(n: int) -> str:
+    return f"{n:,}".replace(",", ".")
+
+
+def armar_prompt(paso: Paso, instr: dict, salidas: dict, clase: Clase, i: int, n: int,
+                 nota: str = "") -> str:
     partes = [instr["agente_principal"] if paso.clave == "6_agente_principal" else instr[paso.clave],
               f'Clase: "{clase.base}" del curso "{clase.curso}".',
               paso.tarea]
-    if paso.clave == "6_agente_principal" and n > 1:
-        pos = f"Este es el fragmento {i} de {n} de la clase."
-        if i > 1:
-            pos += " Continúa la explicación: no vuelvas a presentar la clase ni a los profesores."
-        if i < n:
-            pos += " No escribas una conclusión final: la clase sigue en el siguiente fragmento."
-        partes.append(pos)
+    if paso.clave == "6_agente_principal":
+        largo = len(salidas["transcripcion"])
+        objetivo = max(1500, int(largo * 0.6) // 500 * 500)
+        partes.append(f"Extensión: no resumas. Como referencia, escribe unos {_miles(objetivo)} "
+                      f"caracteres o más (este fragmento de la clase tiene {_miles(largo)}).")
+        if n > 1:
+            pos = f"Este es el fragmento {i} de {n} de la clase."
+            if i > 1:
+                pos += (" Continúa la explicación: no vuelvas a presentar la clase ni a los "
+                        "profesores.")
+            if i < n:
+                pos += " No escribas una conclusión final: la clase sigue en el siguiente fragmento."
+            partes.append(pos)
     partes.append(PIE_COMUN)
+    if paso.clave in PASOS_PROSA:
+        partes.append(PIE_PROSA)
+    if nota:
+        partes.append(nota)
     for clave in paso.entradas:
         etiqueta = ETIQUETAS[clave].format(i=i, n=n)
         partes.append(f"=== {etiqueta} ===\n{salidas[clave]}")
@@ -661,43 +792,79 @@ class SinSintesis(RuntimeError):
     """El agente principal no pudo escribir el borrador de este fragmento."""
 
 
-def ejecutar_paso(api: Api, paso: Paso, prompt: str, prefijo: str) -> str:
-    for intento in (1, 2):
+def ejecutar_paso(api: Api, paso: Paso, armar, prefijo: str, nota: str = "") -> str:
+    """Llama al subagente. Si el filtro de contenido bloquea o corta la respuesta, reintenta
+    (hasta 3 veces) pidiendo un lenguaje academico neutro."""
+    prosa = paso.clave in PASOS_PROSA
+    ultimo: Exception = Bloqueado("sin respuesta")
+    for intento in range(1, 4):
+        if PARAR.is_set():
+            raise Interrumpido("detenido")
+        extra = "\n\n".join(x for x in (nota, NOTA_FILTRO if intento > 1 else "") if x)
         try:
-            return api.preguntar(prompt, web=paso.web).texto
+            texto = api.preguntar(armar(extra), web=paso.web).texto
+            texto = limpiar_respuesta(texto, prosa)
+            if not texto:
+                raise Bloqueado("respuesta vacia")
+            if prosa and parece_cortado(texto):
+                raise Bloqueado("la respuesta llego cortada")
+            return texto
         except Bloqueado as e:
-            if intento == 2:
-                raise
-            log(f"{prefijo}   sin respuesta ({e}); se reintenta una vez...")
-            time.sleep(10)
-    raise AssertionError("inalcanzable")
+            ultimo = e
+            if intento < 3:
+                log(f"{prefijo}   {e}; reintento {intento + 1}/3 con lenguaje academico neutro...")
+                time.sleep(10)
+    raise ultimo
+
+
+def guardado_valido(clave: str, texto: str) -> bool:
+    if not texto.strip() or _BLOQUEO.search(texto):
+        return False
+    if clave in PASOS_PROSA and parece_cortado(limpiar_respuesta(texto, True)):
+        return False
+    return True
 
 
 def procesar_bloque(api: Api, instr: dict, clase: Clase, texto: str, etiqueta: str,
                     i: int, n: int, dir_pasos: str) -> str:
-    prefijo = f"   [{clase.base} | fragmento {etiqueta}]"
+    prefijo = f"   [{clase.corto} · fragmento {i}{etiqueta[3:]}/{n}]"
     ruta_final = os.path.join(dir_pasos, f"{etiqueta}_final.md")
-    if os.path.exists(ruta_final) and es_explicacion_valida(leer(ruta_final)):
+    if os.path.exists(ruta_final) and fragmento_valido(leer(ruta_final)):
         log(f"{prefijo} ya estaba terminado (se recupera de Drive)")
         return leer(ruta_final).strip()
 
     salidas = {"transcripcion": texto}
+    rehacer_desde_aqui = False     # si se rehace un paso, los siguientes tambien
     for k, paso in enumerate(PASOS, 1):
+        if PARAR.is_set():
+            raise Interrumpido("detenido")
+        prosa = paso.clave in PASOS_PROSA
         ruta = os.path.join(dir_pasos, f"{etiqueta}_{paso.clave}.md")
-        if os.path.exists(ruta) and leer(ruta).strip():
-            salidas[paso.clave] = leer(ruta).strip()
+        if not rehacer_desde_aqui and os.path.exists(ruta) and guardado_valido(paso.clave, leer(ruta)):
+            salidas[paso.clave] = limpiar_respuesta(leer(ruta), prosa)
             log(f"{prefijo} paso {k}/8 {paso.nombre}: recuperado de Drive")
             continue
+        rehacer_desde_aqui = True
         log(f"{prefijo} paso {k}/8 {paso.nombre}..." + (" (con busqueda web)" if paso.web and api.web else ""))
         t0 = time.time()
+
+        def armar(nota, paso=paso):
+            return armar_prompt(paso, instr, salidas, clase, i, n, nota)
         try:
-            resultado = ejecutar_paso(api, paso, armar_prompt(paso, instr, salidas, clase, i, n),
-                                      prefijo)
+            resultado = ejecutar_paso(api, paso, armar, prefijo)
+            if paso.clave == "6_agente_principal" and len(resultado) < 0.3 * len(texto):
+                log(f"{prefijo}   el borrador quedo muy corto ({_miles(len(resultado))} caracteres); "
+                    "se pide de nuevo completo...")
+                try:
+                    otro = ejecutar_paso(api, paso, armar, prefijo,
+                                         nota=NOTA_CORTO.format(largo=_miles(len(resultado))))
+                    resultado = max(resultado, otro, key=len)
+                except Bloqueado:
+                    pass
         except Bloqueado as e:
             if k <= 5:
                 log(f"{prefijo}   {paso.nombre} no devolvio nada ({e}); se sigue sin su aporte")
-                resultado = (f"({paso.nombre} no devolvio resultado para este fragmento: "
-                             f"{e}.)")
+                resultado = f"({paso.nombre} no devolvio resultado para este fragmento.)"
             elif paso.clave == "6_agente_principal":
                 raise SinSintesis(str(e))
             else:
@@ -705,25 +872,27 @@ def procesar_bloque(api: Api, instr: dict, clase: Clase, texto: str, etiqueta: s
                 log(f"{prefijo}   {paso.nombre} no devolvio nada ({e}); se usa el texto del paso anterior")
                 resultado = salidas[anterior]
 
-        # Si un revisor devuelve un texto mucho mas corto, probablemente lo corto o resumio.
-        if paso.clave == "7_format_enforcer" and len(resultado) < 0.45 * len(salidas["6_agente_principal"]):
+        # Un revisor no deberia acortar el texto: si lo hace, se conserva el anterior.
+        if paso.clave == "7_format_enforcer" and len(resultado) < 0.6 * len(salidas["6_agente_principal"]):
             log(f"{prefijo}   el Format Enforcer acorto demasiado el texto; se conserva el borrador")
             resultado = salidas["6_agente_principal"]
-        if paso.clave == "8_vocabulary_checker" and len(resultado) < 0.7 * len(salidas["7_format_enforcer"]):
+        if paso.clave == "8_vocabulary_checker" and len(resultado) < 0.75 * len(salidas["7_format_enforcer"]):
             log(f"{prefijo}   el Vocabulary Checker acorto demasiado el texto; se conserva el anterior")
             resultado = salidas["7_format_enforcer"]
 
         salidas[paso.clave] = resultado
         escribir(ruta, resultado)
-        log(f"{prefijo}   listo en {int(time.time() - t0)} s ({len(resultado):,} caracteres)")
+        log(f"{prefijo}   listo en {int(time.time() - t0)} s ({_miles(len(resultado))} caracteres)")
 
     final = salidas["8_vocabulary_checker"]
     if lineas_de_lista(final) > 2:
-        log(f"{prefijo} quedaron listas o titulos; pasada extra del Format Enforcer...")
+        log(f"{prefijo} quedaron listas; pasada extra del Format Enforcer...")
         extra = PASOS[6]
         try:
-            final = ejecutar_paso(api, extra, armar_prompt(
-                extra, instr, {"6_agente_principal": final}, clase, i, n), prefijo)
+            otro = ejecutar_paso(api, extra, lambda nota: armar_prompt(
+                extra, instr, {"6_agente_principal": final}, clase, i, n, nota), prefijo)
+            if len(otro) >= 0.75 * len(final):
+                final = otro
         except Bloqueado:
             pass
         final = quitar_formato(final)
@@ -737,29 +906,46 @@ def procesar_bloque_dividiendo(api: Api, instr: dict, clase: Clase, texto: str, 
     try:
         return procesar_bloque(api, instr, clase, texto, etiqueta, i, n, dir_pasos)
     except SinSintesis as e:
+        prefijo = f"   [{clase.corto} · fragmento {i}{etiqueta[3:]}/{n}]"
         if len(texto) < 3000:
-            raise RuntimeError(f"el fragmento {etiqueta} no se pudo explicar ({e})")
-        log(f"   [{clase.base} | fragmento {etiqueta}] sin respuesta del agente principal ({e}); "
-            "se divide en dos mitades")
+            log(f"{prefijo} no se pudo explicar ni en trozos pequenos ({e}); se deja una nota "
+                "en la explicacion y se sigue")
+            return NOTA_PARTE_BLOQUEADA
+        log(f"{prefijo} el agente principal no pudo con este fragmento ({e}); se divide en dos mitades")
         mitades = dividir_en_bloques(texto, len(texto) // 2 + 200)
         return "\n\n".join(
             procesar_bloque_dividiendo(api, instr, clase, m, etiqueta + "abcdefgh"[j], i, n, dir_pasos)
             for j, m in enumerate(mitades))
 
 
+def en_paralelo(func, items: list, hilos: int) -> list:
+    """Como ThreadPoolExecutor.map, pero si detienes la celda se detiene de verdad."""
+    ex = ThreadPoolExecutor(max_workers=max(1, hilos))
+    futuros = [ex.submit(func, x) for x in items]
+    try:
+        return [f.result() for f in futuros]
+    except (KeyboardInterrupt, SystemExit, Interrumpido):
+        PARAR.set()
+        raise
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+
+
 def explicar_clase(api: Api, cfg: Config, instr: dict, clase: Clase, transcripcion: str) -> str:
+    pre = f"   [{clase.corto}]"
     dir_pasos = os.path.join(cfg.carpeta, CARPETA_INTERNA, "pasos", limpiar_nombre(clase.curso),
                              limpiar_nombre(clase.base))
     if os.path.exists(clase.ruta_explicacion):
         previo = leer(clase.ruta_explicacion)
         if es_explicacion_valida(previo) and not cfg.rehacer:
-            log("   explicacion en espanol ya hecha (se reutiliza)")
+            log(f"{pre} explicacion en espanol ya hecha (se reutiliza)")
             return previo
-        motivo = "se pidio rehacerla" if cfg.rehacer else "era un informe o tenia listas"
+        motivo = ("se pidio rehacerla" if cfg.rehacer else
+                  "era un informe, tenia listas, saludos del asistente o un texto bloqueado")
         respaldo = os.path.join(dir_pasos, f"version_anterior_{time.strftime('%Y%m%d-%H%M%S')}.txt")
         os.makedirs(dir_pasos, exist_ok=True)
         shutil.move(clase.ruta_explicacion, respaldo)
-        log(f"   la explicacion anterior no sirve ({motivo}); se guardo en {respaldo}")
+        log(f"{pre} la explicacion anterior no sirve ({motivo}); se guardo en {respaldo}")
 
     bloques = dividir_en_bloques(transcripcion, cfg.bloque_chars)
     plan = {"transcripcion": sha(transcripcion), "bloque_chars": cfg.bloque_chars,
@@ -774,17 +960,28 @@ def explicar_clase(api: Api, cfg: Config, instr: dict, clase: Clase, transcripci
                     os.remove(os.path.join(dir_pasos, f))
     escribir(ruta_plan, json.dumps(plan, indent=2))
 
-    log(f"   {len(transcripcion):,} caracteres -> {len(bloques)} fragmento(s) x 8 pasos "
-        f"({cfg.paralelo} fragmento(s) a la vez). Pasos guardados en:\n   {dir_pasos}")
-    with ThreadPoolExecutor(max_workers=max(1, cfg.paralelo)) as ex:
-        futuros = [ex.submit(procesar_bloque_dividiendo, api, instr, clase, b, f"b{i:02d}", i,
-                             len(bloques), dir_pasos)
-                   for i, b in enumerate(bloques, 1)]
-        partes = [f.result() for f in futuros]
+    a_la_vez = max(1, min(cfg.paralelo, len(bloques)))
+    log(f"{pre} {_miles(len(transcripcion))} caracteres -> {len(bloques)} fragmentos de unos 20 "
+        f"minutos; cada uno pasa por los 8 pasos ({a_la_vez} fragmento(s) a la vez).\n"
+        f"{pre} Lo que entrega cada subagente se guarda en: {dir_pasos}")
+    listos = []
+    lock = threading.Lock()
+
+    def uno(args):
+        i, b = args
+        parte = procesar_bloque_dividiendo(api, instr, clase, b, f"b{i:02d}", i, len(bloques),
+                                           dir_pasos)
+        with lock:
+            listos.append(i)
+            log(f"{pre} fragmento {i}/{len(bloques)} terminado (listos: {len(listos)} de "
+                f"{len(bloques)})")
+        return parte
+
+    partes = en_paralelo(uno, list(enumerate(bloques, 1)), a_la_vez)
     explicacion = "\n\n".join(p.strip() for p in partes if p.strip()) + "\n"
     escribir(clase.ruta_explicacion, explicacion)
-    log(f"   explicacion guardada: {os.path.basename(clase.ruta_explicacion)} "
-        f"({len(explicacion):,} caracteres)")
+    log(f"{pre} explicacion guardada: {os.path.basename(clase.ruta_explicacion)} "
+        f"({_miles(len(explicacion))} caracteres)")
     return explicacion
 
 
@@ -828,7 +1025,7 @@ def cuaderno_y_audio(api: Api, cfg: Config, clase: Clase, transcripcion: str, ex
 
     nb = e.get("notebook_id")
     if nb and api.cuaderno(nb) is None:
-        log("   el cuaderno registrado ya no existe; se crea otro")
+        log(f"   [{clase.corto}] el cuaderno registrado ya no existe; se crea otro")
         nb = None
         for k in ("notebook_id", "fuentes", "fuentes_sha", "audio", "audio_id"):
             e.pop(k, None)
@@ -836,9 +1033,9 @@ def cuaderno_y_audio(api: Api, cfg: Config, clase: Clase, transcripcion: str, ex
         nb = api.crear_cuaderno(clase.titulo)
         e.update(notebook_id=nb, titulo=clase.titulo, creado=time.strftime("%Y-%m-%d %H:%M"))
         reg.guardar()
-        log(f"   cuaderno creado: {clase.titulo}  (id {nb})")
+        log(f"   [{clase.corto}] cuaderno creado: {clase.titulo}  (id {nb})")
     else:
-        log(f"   cuaderno existente: {clase.titulo}  (id {nb})")
+        log(f"   [{clase.corto}] cuaderno existente: {clase.titulo}  (id {nb})")
 
     if e.get("fuentes_sha") != huella:
         nombre_t = f"{clase.base} - Transcripción original (EN)"
@@ -851,7 +1048,7 @@ def cuaderno_y_audio(api: Api, cfg: Config, clase: Clase, transcripcion: str, ex
                for s in fuentes]
         e.update(fuentes=[i for i in ids if i], fuentes_sha=huella)
         reg.guardar()
-        log("   fuentes subidas: transcripcion + explicacion")
+        log(f"   [{clase.corto}] fuentes subidas: transcripcion + explicacion")
         api.esperar_fuentes(nb, e["fuentes"])
 
     if not cfg.crear_audio or e.get("audio") == "creado":
@@ -865,14 +1062,16 @@ def cuaderno_y_audio(api: Api, cfg: Config, clase: Clase, transcripcion: str, ex
         e.update(audio="creado", audio_id=res.get("audioOverviewId", ""),
                  audio_pedido=time.strftime("%Y-%m-%d %H:%M"))
         est.creados += 1
-        log("   Audio Overview en espanol pedido: estara listo en unos minutos en el panel Studio")
+        log(f"   [{clase.corto}] Audio Overview en espanol pedido: estara listo en unos minutos "
+            "en el panel Studio")
     except CupoAgotado as err:
         est.cupo_agotado = True
         e["audio"] = "pendiente (cupo diario agotado)"
-        log(f"   cupo diario de Audio Overviews agotado; se pedira en la proxima ejecucion ({err})")
+        log(f"   [{clase.corto}] cupo diario de Audio Overviews agotado; se pedira en la proxima "
+            f"ejecucion ({err})")
     except ApiError as err:
         e["audio"] = f"error: {err}"[:400]
-        log(f"   FALLO el Audio Overview: {err}")
+        log(f"   [{clase.corto}] FALLO el Audio Overview: {err}")
     reg.guardar()
 
 
@@ -958,23 +1157,41 @@ def ejecutar(cfg: Config) -> int:
     if cfg.max_clases:
         print(f"En esta ejecucion se procesan hasta {cfg.max_clases}.")
 
-    est, hechas, fallos = EstadoAudio(), 0, []
-    for clase in pendientes:
-        if cfg.max_clases and hechas >= cfg.max_clases:
-            break
-        hechas += 1
-        print("\n" + "=" * 72 + f"\n{clase.clave}\n" + "=" * 72, flush=True)
+    lote = pendientes[:cfg.max_clases] if cfg.max_clases else pendientes
+    hechas = len(lote)
+    est, fallos, lock_cuadernos = EstadoAudio(), [], threading.Lock()
+    PARAR.clear()
+    if cfg.clases_a_la_vez > 1 and len(lote) > 1:
+        print(f"Se procesan {min(cfg.clases_a_la_vez, len(lote))} clases a la vez.")
+
+    def trabajar(clase: Clase):
+        if PARAR.is_set():
+            return None
+        log("\n" + "=" * 72 + f"\nEMPIEZA  {clase.clave}\n" + "=" * 72)
         try:
             transcripcion = leer(clase.ruta).strip()
             if len(transcripcion) < 200:
-                print("   transcripcion vacia o muy corta; se salta")
-                continue
+                log(f"   [{clase.corto}] transcripcion vacia o muy corta; se salta")
+                return None
             explicacion = explicar_clase(api, cfg, instr, clase, transcripcion)
             if cfg.crear_cuaderno:
-                cuaderno_y_audio(api, cfg, clase, transcripcion, explicacion, reg, est)
+                with lock_cuadernos:          # el registro se escribe de a uno
+                    cuaderno_y_audio(api, cfg, clase, transcripcion, explicacion, reg, est)
+            log(f"TERMINADA  {clase.clave}")
+            return None
+        except Interrumpido:
+            return None
         except (ApiError, RuntimeError, OSError, ValueError) as e:
-            print(f"   FALLO: {e}")
-            fallos.append(f"{clase.clave}: {e}")
+            log(f"   [{clase.corto}] FALLO: {e}")
+            return f"{clase.clave}: {e}"
+
+    try:
+        fallos = [f for f in en_paralelo(trabajar, lote, cfg.clases_a_la_vez) if f]
+    except (KeyboardInterrupt, Interrumpido):
+        PARAR.set()
+        print("\nDetenido. Lo que ya estaba hecho quedo guardado en Drive; vuelve a ejecutar "
+              "la celda para seguir desde ahi.")
+        return 130
 
     restantes = len(pendientes) - hechas
     print("\n" + "=" * 72)
@@ -1066,7 +1283,8 @@ def main(argv=None) -> int:
     p.add_argument("--max-clases", type=int, default=1, help="0 = todas")
     p.add_argument("--solo-curso", default="", help="solo rutas que contengan este texto")
     p.add_argument("--bloque-chars", type=int, default=15000)
-    p.add_argument("--paralelo", type=int, default=2, help="fragmentos procesados a la vez")
+    p.add_argument("--paralelo", type=int, default=5, help="fragmentos de una clase a la vez")
+    p.add_argument("--clases-a-la-vez", type=int, default=1, help="clases procesadas a la vez")
     p.add_argument("--sin-busqueda-web", action="store_true")
     p.add_argument("--conservar-chats", action="store_true",
                    help="no borrar los chats que se crean en tu historial de Gemini Enterprise")
@@ -1083,7 +1301,8 @@ def main(argv=None) -> int:
     cfg = Config(carpeta=a.carpeta, project_id=a.project_id, project_number=a.project_number,
                  location=a.location, engine_id=a.engine_id, modelo=a.modelo,
                  max_clases=a.max_clases, solo_curso=a.solo_curso, bloque_chars=a.bloque_chars,
-                 paralelo=a.paralelo, busqueda_web=not a.sin_busqueda_web,
+                 paralelo=a.paralelo, clases_a_la_vez=a.clases_a_la_vez,
+                 busqueda_web=not a.sin_busqueda_web,
                  borrar_chats=not a.conservar_chats, crear_cuaderno=not a.sin_cuaderno,
                  crear_audio=not (a.sin_audio or a.sin_cuaderno), idioma_audio=a.idioma_audio,
                  enfoque_audio=a.enfoque_audio, rehacer=a.rehacer)
