@@ -9,27 +9,34 @@ Toma las transcripciones que deja dce_downloader.py (en ingles):
 
 y para cada una:
 
-  1. Divide la transcripcion en fragmentos (~15.000 caracteres, unos 20 minutos de
-     clase) y pasa CADA fragmento por los 7 subagentes del "Topic Simplifier Agent"
-     y por el agente principal, en este orden y esperando a que termine cada uno:
+  1. Divide la transcripcion en partes (~15.000 caracteres, unos 20 minutos de clase)
+     y pasa cada parte por los 7 subagentes del "Topic Simplifier Agent" y por el
+     agente principal, esperando a que termine cada uno:
 
-        1 Deep Researcher        (con busqueda en Google)
-        2 Concept Analyzer       (con busqueda en Google)
-        3 Contextualizer         (con busqueda en Google)
-        4 Analogy Creator        (con busqueda en Google)
-        5 Jargon Buster
-        6 Agente principal       (une todo en un borrador)
-        7 Format Enforcer
-        8 Vocabulary Checker     -> texto final
+        1 Deep Researcher        (con busqueda en Google)   \
+        2 Concept Analyzer       (con busqueda en Google)    > fase 1: todas las partes
+        3 Contextualizer         (con busqueda en Google)   /  a la vez (investigacion)
+        4 Analogy Creator        (con busqueda en Google)   \
+        5 Jargon Buster                                       \
+        6 Agente principal       (escribe la explicacion)      > fase 2: parte por parte,
+        7 Format Enforcer        (oraciones cortas)          /  EN ORDEN
+        8 Vocabulary Checker     (palabras sencillas)       /
+
+     En la fase 2 cada parte recibe la lista de conceptos que ya se explicaron y el
+     final de la parte anterior: asi no se repiten definiciones ni analogias y el
+     texto sigue el hilo de la clase.
 
      Cada paso es una llamada al asistente de Gemini Enterprise (streamAssist) con
-     las instrucciones de ese subagente y lo que entregaron los pasos anteriores.
+     las instrucciones de ese subagente y lo que entregaron los pasos anteriores. El
+     asistente escribe su resultado entre <entregable> y </entregable>; lo que ponga
+     fuera (saludos, "Aqui tienes...", preguntas) se descarta sin tocar el texto.
      Lo que devuelve cada subagente se guarda en
 
         Clases/_simplificador/pasos/<curso>/<clase>/b01_1_deep_researcher.md ...
 
      asi puedes ver que trabajaron todos. Si Colab se desconecta, al volver a
-     ejecutar se sigue desde el ultimo paso guardado.
+     ejecutar se sigue desde el ultimo paso guardado. Un paso que fallo nunca se
+     guarda: se vuelve a intentar.
 
   2. Guarda la explicacion final junto a la transcripcion:
         .../L01 - 2026-01-27 - Lecture_simplificado_es.txt
@@ -44,10 +51,10 @@ un "chat agent". Por la API, el agente principal le pasa la pregunta a UN subage
 "Informes de Investigacion Profunda" en vez de la explicacion final. Aqui el script
 hace de orquestador: llama a cada subagente, uno detras de otro, con sus instrucciones.
 
-Las instrucciones de los subagentes se guardan la primera vez en
+Las instrucciones de los subagentes se guardan en
     Clases/_simplificador/instrucciones_agentes.json
-Si las editas ahi (por ejemplo, pegando el texto exacto de tu agente), se usan tus
-versiones en las siguientes ejecuciones.
+Si editas alguna ahi (por ejemplo, pegando el texto exacto de tu agente), se usa tu
+version. Las que no editaste se actualizan solas cuando el script trae una nueva.
 
 Uso (en Colab, despues de `gcloud auth login` con la cuenta de Gemini Enterprise):
     python simplificador_clases.py --carpeta /content/drive/MyDrive/Clases --probar
@@ -86,7 +93,7 @@ INSTRUCCIONES = "instrucciones_agentes.json"
 AGENTE_PRINCIPAL = (
     "Eres el Topic Simplifier Agent: un experto en simplificar temas y el orquestador de "
     "7 subagentes. Tu objetivo es ayudar a entender temas complejos dividiéndolos en "
-    "explicaciónes muy simples. El resultado debe ser extremadamente fácil de leer, aprender "
+    "explicaciones muy simples. El resultado debe ser extremadamente fácil de leer, aprender "
     "y comprender. Eres el ÚNICO agente que se comunica con el usuario: sintetizas los "
     "hallazgos de todos tus subagentes en una respuesta final cohesiva que explica todos los "
     "términos técnicos. El formato final no usa listas ni viñetas, responde al 'por qué' de "
@@ -151,6 +158,12 @@ INSTRUCCIONES_POR_DEFECTO = {
     ),
 }
 
+# Textos por defecto que tuvieron versiones anteriores del script. Si tu
+# instrucciones_agentes.json tiene uno de estos, no lo editaste tu: se usa el actual.
+DEFECTOS_ANTERIORES = {
+    "agente_principal": [AGENTE_PRINCIPAL.replace("explicaciones muy", "explicaciónes muy")],
+}
+
 ENFOQUE_AUDIO = (
     "Expliquen esta clase en español a una persona sin conocimientos previos, como lo haría un "
     "simplificador experto. Hablen con oraciones cortas y directas, en una conversación fluida, "
@@ -162,6 +175,10 @@ ENFOQUE_AUDIO = (
 )
 
 
+# Version del metodo. Las explicaciones hechas con una version anterior se rehacen.
+METODO = 3
+
+
 @dataclass
 class Paso:
     clave: str
@@ -169,78 +186,118 @@ class Paso:
     web: bool
     entradas: list
     tarea: str
+    version: int = 1    # si cambia, los resultados guardados de este paso se rehacen
 
 
 PASOS = [
     Paso("1_deep_researcher", "Deep Researcher", True, ["transcripcion"],
-         "Analiza el fragmento de la transcripción de abajo. Es una transcripción automática en "
-         "inglés de una clase universitaria, así que puede tener nombres y palabras mal "
-         "reconocidos: identifícalos y corrígelos también. Entrega tu informe en español."),
+         "Analiza esta parte de la transcripción. Es una transcripción automática en inglés de "
+         "una clase universitaria, así que puede tener nombres y palabras mal reconocidos: "
+         "identifícalos y corrígelos también. Entrega tu informe en español."),
     Paso("2_concept_analyzer", "Concept Analyzer", True, ["transcripcion", "1_deep_researcher"],
-         "Identifica los conceptos y términos centrales de este fragmento de la clase."),
+         "Identifica los conceptos y términos centrales de esta parte de la clase."),
     Paso("3_contextualizer", "Contextualizer", True,
          ["transcripcion", "1_deep_researcher", "2_concept_analyzer"],
-         "Da el contexto y los motivos (el porqué y el para qué) de lo que se explica en este "
-         "fragmento de la clase."),
-    Paso("4_analogy_creator", "Analogy Creator", True, ["2_concept_analyzer", "3_contextualizer"],
+         "Da el contexto y los motivos (el porqué y el para qué) de lo que se explica en esta "
+         "parte de la clase."),
+    Paso("4_analogy_creator", "Analogy Creator", True,
+         ["memoria", "transcripcion", "1_deep_researcher", "2_concept_analyzer", "3_contextualizer"],
          "Crea una analogía cotidiana en español para cada concepto central que identificó el "
-         "Concept Analyzer."),
+         "Concept Analyzer en esta parte de la clase. Apóyate en los ejemplos que usó el profesor "
+         "y en los hechos del Deep Researcher, para que cada analogía encaje con lo que se dijo "
+         "en clase. No les inventes otra analogía a los conceptos que ya se explicaron en partes "
+         "anteriores.", version=3),
     Paso("5_jargon_buster", "Jargon Buster", False,
-         ["transcripcion", "1_deep_researcher", "2_concept_analyzer"],
-         "Traduce al español simple cada término técnico, palabra de jerga y frase formal de "
-         "este fragmento de la clase."),
+         ["memoria", "transcripcion", "1_deep_researcher", "2_concept_analyzer"],
+         "Traduce al español de todos los días cada término técnico, palabra de jerga y frase "
+         "formal de esta parte de la clase, y explica qué hace en la práctica. No repitas los "
+         "conceptos que ya se explicaron en partes anteriores.", version=3),
     Paso("6_agente_principal", "Agente principal (síntesis)", False,
-         ["transcripcion", "1_deep_researcher", "2_concept_analyzer", "3_contextualizer",
-          "4_analogy_creator", "5_jargon_buster"],
-         "Ya recibiste los resultados de tus 5 primeros subagentes. Escribe el borrador de la "
-         "explicación de ESTE fragmento de la clase, en español, siguiendo el orden en que el "
-         "profesor presentó los temas. Explica todo lo que se enseñó en el fragmento (no solo un "
-         "resumen) e integra los hechos verificados, el contexto, las analogías y las "
-         "traducciones de la jerga. Escribe solo párrafos de prosa: sin listas, viñetas, "
-         "títulos ni imágenes."),
+         ["memoria", "anterior", "transcripcion", "1_deep_researcher", "2_concept_analyzer",
+          "3_contextualizer", "4_analogy_creator", "5_jargon_buster"],
+         "Ya recibiste los resultados de tus 5 primeros subagentes. Escribe la explicación de "
+         "ESTA parte de la clase, siguiendo el orden en que el profesor presentó los temas. "
+         "Escribe como un buen profesor particular que le cuenta la clase a un amigo que no sabe "
+         "nada del tema: en tercera persona sobre lo que dijo el profesor (\"el profesor "
+         "explica que...\"), nunca como si fueras el profesor ni en primera persona del plural. "
+         "Explica todo lo que se enseñó, sin relleno ni frases decorativas. Lo administrativo "
+         "(micrófonos, saludos, avisos) va en una frase como mucho; lo importante del curso (de "
+         "qué trata, cómo se evalúa) sí explícalo. Cada concepto difícil lleva su explicación "
+         "sencilla (del Jargon Buster), su porqué (del Contextualizer) y su analogía (del "
+         "Analogy Creator). Usa los hechos exactos del Deep Researcher, con los nombres y las "
+         "cifras corregidos. Los conceptos que ya se explicaron en partes anteriores solo se "
+         "nombran, sin volver a definirlos. Oraciones cortas (unas 20 palabras como máximo) y "
+         "palabras de uso diario. Solo párrafos de prosa: sin listas, viñetas, títulos ni "
+         "imágenes.", version=3),
     Paso("7_format_enforcer", "Format Enforcer", False, ["6_agente_principal"],
-         "Reescribe el borrador de abajo. Conserva todos los datos, nombres, cifras y analogías, "
-         "y no lo acortes: deben quedar todos los párrafos. Entrega solo el texto reescrito."),
+         "Reescribe el texto de abajo para que sea muy fácil de leer: divide toda oración de más "
+         "de unas 20 palabras en oraciones más cortas y cambia las construcciones complicadas por "
+         "otras simples. Puedes quitar frases de relleno, pero conserva todas las explicaciones, "
+         "datos, nombres, cifras y analogías. Mantén el tono cercano y sencillo.", version=3),
     Paso("8_vocabulary_checker", "Vocabulary Checker", False, ["7_format_enforcer"],
-         "Revisa el texto de abajo y devuelve el texto completo mejorado, con todos sus "
-         "párrafos (no lo resumas)."),
+         "Cambia solo las palabras genéricas o vagas (cosas, hacer, bueno, malo, algo, tema...) "
+         "por palabras concretas pero sencillas, de las que se usan todos los días. No cambies "
+         "palabras simples por otras cultas o técnicas, no alargues las oraciones y no quites "
+         "contenido. Devuelve el texto completo.", version=3),
 ]
 
 ETIQUETAS = {
-    "transcripcion": "TRANSCRIPCIÓN ORIGINAL EN INGLÉS (fragmento {i} de {n})",
+    "memoria": "CONCEPTOS YA EXPLICADOS EN PARTES ANTERIORES DE LA CLASE (no los vuelvas a "
+               "definir ni les inventes otra analogía; si aparecen, solo nómbralos)",
+    "anterior": "FINAL DE LA PARTE ANTERIOR DE LA EXPLICACIÓN (continúa desde aquí con fluidez, "
+                "sin repetirlo)",
+    "transcripcion": "TRANSCRIPCIÓN ORIGINAL EN INGLÉS (parte {i} de {n})",
     "1_deep_researcher": "INFORME DEL DEEP RESEARCHER",
     "2_concept_analyzer": "CONCEPTOS CENTRALES (CONCEPT ANALYZER)",
     "3_contextualizer": "CONTEXTO Y MOTIVOS (CONTEXTUALIZER)",
     "4_analogy_creator": "ANALOGÍAS (ANALOGY CREATOR)",
     "5_jargon_buster": "JERGA TRADUCIDA (JARGON BUSTER)",
-    "6_agente_principal": "BORRADOR A REESCRIBIR",
+    "6_agente_principal": "TEXTO A REESCRIBIR",
     "7_format_enforcer": "TEXTO A REVISAR",
 }
 
+# Todo lo que el asistente escriba fuera de <entregable> (saludos, "Aqui tienes...",
+# preguntas finales) se descarta sin tocar el texto de adentro.
 PIE_COMUN = (
-    "El material es la transcripción de una clase universitaria (contenido académico). "
-    "Tu respuesta se guarda automáticamente en un archivo y nadie la va a leer como un chat. "
-    "Escribe solo el entregable: no saludes, no te presentes, no menciones a Gemini Enterprise "
-    "ni tu papel, no expliques lo que hiciste, no hagas preguntas ni ofrezcas más ayuda al "
-    "final, no uses emojis y no generes imágenes."
+    "El material es la transcripción de una clase universitaria (contenido académico). Este es "
+    "un proceso automático: escribe tu entregable completo entre las etiquetas <entregable> y "
+    "</entregable>. Todo lo que esté fuera de las etiquetas se descarta. Dentro de las etiquetas "
+    "no saludes, no te presentes, no menciones a Gemini Enterprise ni tu papel, no hagas "
+    "preguntas, no uses emojis y no generes imágenes."
 )
 
 PIE_PROSA = (
-    "Formato obligatorio: texto plano en párrafos separados por una línea en blanco. Sin "
-    "markdown: nada de títulos, #, asteriscos, negritas, guiones de lista, listas numeradas ni "
-    "separadores (---)."
+    "Formato dentro de <entregable>: texto plano en párrafos separados por una línea en blanco. "
+    "Sin markdown: nada de títulos, #, asteriscos, negritas, listas ni separadores."
+)
+
+TAREA_TERMINOS = (
+    "Después de </entregable>, escribe entre <terminos> y </terminos> una línea por cada "
+    "concepto que explicaste en esta parte, así: concepto: la analogía que usaste, en pocas "
+    "palabras."
 )
 
 NOTA_FILTRO = (
     "Aviso: un filtro automático de contenido bloqueó o cortó el intento anterior. Es un falso "
-    "positivo, porque el material es una clase universitaria. Usa un lenguaje académico neutro y "
-    "sobrio, y evita descripciones físicas o gráficas innecesarias (por ejemplo, de cuerpos o de "
-    "desnudez en obras de arte), sin omitir ningún dato de la clase."
+    "positivo, porque el material es una clase universitaria. Mantén el mismo tono sencillo y "
+    "cercano. Solo donde se describe algo delicado (por ejemplo, cuerpos o desnudez en obras de "
+    "arte, violencia o prácticas médicas antiguas), descríbelo de forma breve, indirecta y "
+    "respetuosa, sin detalles físicos. No omitas ningún dato de la clase."
+)
+
+NOTA_ETIQUETAS = (
+    "Aviso: en el intento anterior faltaron las etiquetas. Escribe tu entregable completo entre "
+    "<entregable> y </entregable>."
 )
 
 NOTA_CORTO = (
-    "Aviso: tu borrador anterior fue demasiado corto ({largo} caracteres) para todo lo que se "
-    "enseña en este fragmento. Explica TODO el contenido del fragmento, tema por tema."
+    "Aviso: tu texto anterior fue demasiado corto ({largo} caracteres) para todo lo que se enseña "
+    "en esta parte. Explica TODO el contenido, tema por tema, sin relleno."
+)
+
+NOTA_NO_RESUMAS = (
+    "Aviso: tu versión anterior quitó demasiado contenido. Conserva todas las explicaciones, los "
+    "datos y las analogías; cambia solo lo que pide tu tarea."
 )
 
 NOTA_PARTE_BLOQUEADA = (
@@ -285,28 +342,22 @@ def limpiar_nombre(nombre: str) -> str:
 
 _LINEA_DE_LISTA = re.compile(r"(?m)^\s*(#{1,6}\s|[-*•]\s|\d{1,2}[.)]\s|-{3,}\s*$)")
 _MARCAS_INVALIDAS = ("<end_of_image>", "Informe de Investigaci", "Estado del Informe",
-                     "Cumplimiento Total", "Cumplimiento Parcial", "Full Fulfillment")
+                     "Cumplimiento Total", "Cumplimiento Parcial", "Full Fulfillment",
+                     "<entregable>", "</entregable>")
 
 # Gemini Enterprise corta la respuesta y agrega este aviso cuando la bloquea su filtro.
 _BLOQUEO = re.compile(r"blocked by (your|the) organi[sz]ation|organi[sz]ation'?s content polic"
                       r"|bloquead[oa] por la pol[ií]tica de contenido", re.I)
 _EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]")
-# Frases de chat del asistente (no son parte de la explicacion).
-_META_SIEMPRE = re.compile(
-    r"Gemini Enterprise|\bbro\b|\bcomo (tu |el |un )?(Format Enforcer|Vocabulary Checker|"
-    r"Deep Researcher|Concept Analyzer|Contextualizer|Analogy Creator|Jargon Buster|"
-    r"Topic Simplifier|asistente|Optimizador|Verificador|Ejecutor de Formato)", re.I)
-_META_BORDES = re.compile(
-    r"^(¡\s*)?(hola|claro|por supuesto|perfecto|excelente|genial)\b|^aquí (tienes|está|va)\b"
-    r"|^¡?\s*qué (excelente|buena|gran|magnífica) (iniciativa|idea|pregunta|trabajo|material)"
-    r"|^a continuación,? (te )?(presento|tienes|encontrarás|está)|^buen[oa]s (días|tardes|noches)\W*$"
-    r"|me he encargado|\bhe (reescrito|revisado|optimizado|eliminado|sustituido|reemplazado|pulido|corregido)"
-    r"|¿qué te parece|quedo (más que |muy )?atent|¿(te gustaría|quieres|deseas)|avísame|no dudes en"
-    r"|espero que (esto|te sea|te haya)|si (quieres|deseas) que (optimic|revis|continú|sig|pase|ajust|profundic)"
-    r"|¡?\s*habl(amos|emos)\b|^he \w+(ado|ido)\b|\btus datos\b", re.I)
-# En la explicacion final no se habla de "fragmentos": eso es del proceso, no de la clase.
-_META_PROSA = re.compile(r"\b(este|el|del|al) (primer |segundo |último |siguiente |presente )?"
-                         r"fragmento\b|\bel borrador\b", re.I)
+# Solo para el caso raro de una respuesta sin etiquetas: charla de chat en la primera o la
+# ultima oracion. Nunca se borran oraciones del medio del texto.
+_CHARLA_INICIO = re.compile(r"^\s*(¡\s*hola\b[^.!?]*[.!?]|aquí (tienes|está|va)\b[^.!?:]*[.!?:])\s*", re.I)
+_CHARLA_FINAL = re.compile(r"\s*(¿\s*(qué te parece|quieres que|te gustaría|deseas)[^?]*\?"
+                           r"|quedo (muy |más que )?atent\w*[^.!]*[.!]|¡\s*habl(amos|emos)\W*)\s*$", re.I)
+
+
+def lineas_de_lista(texto: str) -> int:
+    return len(_LINEA_DE_LISTA.findall(texto))
 
 
 def parece_cortado(texto: str) -> bool:
@@ -314,58 +365,61 @@ def parece_cortado(texto: str) -> bool:
     return not re.search(r"[.!?…»\")\]]\s*$", texto.strip())
 
 
-def limpiar_respuesta(texto: str, prosa: bool) -> str:
-    """Quita emojis, saludos y comentarios del asistente; en prosa, tambien titulos y separadores."""
-    t = _EMOJI.sub("", texto.replace("<end_of_image>", ""))
-    lineas = []
-    for linea in t.splitlines():
-        if prosa:
-            if re.match(r"\s*#{1,6}\s", linea) or re.fullmatch(r"\s*([-*_]\s*){3,}", linea):
-                continue                       # titulos markdown y separadores ---
-            linea = linea.replace("**", "").replace("__", "")
-        lineas.append(linea)
-    llenas = [k for k, l in enumerate(lineas) if l.strip()]
-    bordes = set(llenas[:4] + llenas[-4:])     # saludos al principio, ofrecimientos al final
-    salida = []
-    for k, linea in enumerate(lineas):
-        if not linea.strip():
-            salida.append("")
-            continue
-        sangria = re.match(r"\s*", linea).group(0)
-        oraciones = re.split(r"(?<=[.!?…])\s+", linea.strip())
-        quedan = [o for o in oraciones if not _META_SIEMPRE.search(o)
-                  and not (prosa and _META_PROSA.search(o))
-                  and not (k in bordes and _META_BORDES.search(o))]
-        nueva = " ".join(quedan).strip()
-        if nueva:
-            salida.append(sangria + nueva)
-    t = re.sub(r"\n{3,}", "\n\n", "\n".join(salida)).strip()
+def extraer_entre(crudo: str, etiqueta: str) -> tuple[str, str]:
+    """Devuelve (texto, estado): 'ok', 'cortado' (abrio la etiqueta y no la cerro) o
+    'sin_etiquetas'."""
+    t = re.sub(r"\\(?=[<>/])", "", crudo).replace("&lt;", "<").replace("&gt;", ">")
+    bloques = re.findall(rf"<{etiqueta}>(.*?)</{etiqueta}>", t, re.S | re.I)
+    if bloques:
+        return "\n\n".join(b.strip() for b in bloques if b.strip()), "ok"
+    m = re.search(rf"<{etiqueta}>", t, re.I)
+    if m:
+        return t[m.end():].strip(), "cortado"
+    return t.strip(), "sin_etiquetas"
+
+
+def limpiar_ligero(texto: str, prosa: bool, sin_etiquetas: bool = False) -> str:
+    """Solo quita lo que nunca es contenido: emojis, cercos de codigo y, en prosa, los titulos
+    markdown, separadores y negritas. No borra oraciones (salvo charla de chat al principio o al
+    final de una respuesta que vino sin etiquetas)."""
+    t = _EMOJI.sub("", texto.replace("<end_of_image>", "")).strip()
+    t = re.sub(r"^```\w*\s*|\s*```$", "", t)
     if prosa:
+        lineas = [l for l in t.splitlines()
+                  if not re.match(r"\s*#{1,6}\s", l) and not re.fullmatch(r"\s*([-*_]\s*){3,}", l)]
+        t = "\n".join(lineas).replace("**", "").replace("__", "")
+        t = re.sub(r"\n{3,}", "\n\n", t).strip()
         # Un parrafo de una sola linea corta y sin punto final es un titulo: se quita.
-        parrafos = [pa for pa in t.split("\n\n")
-                    if not ("\n" not in pa and len(pa) < 100 and parece_cortado(pa))]
-        t = "\n\n".join(parrafos).strip()
-    return t
+        t = "\n\n".join(pa for pa in t.split("\n\n")
+                        if not ("\n" not in pa and len(pa) < 100 and parece_cortado(pa)))
+    if sin_etiquetas:
+        anterior = None
+        while anterior != t:
+            anterior = t
+            t = _CHARLA_INICIO.sub("", t, count=1)
+            t = _CHARLA_FINAL.sub("", t, count=1)
+    return t.strip()
+
+
+def es_fallo_guardado(texto: str) -> bool:
+    """Restos de versiones anteriores: avisos de 'no devolvio resultado' o texto bloqueado."""
+    t = texto.strip()
+    return (not t or bool(_BLOQUEO.search(t))
+            or (t.startswith("(") and len(t) < 600 and "no devolvi" in t[:120]))
 
 
 def fragmento_valido(texto: str) -> bool:
     t = (texto or "").strip()
-    return bool(t) and not _BLOQUEO.search(t) and not _META_SIEMPRE.search(t) \
-        and lineas_de_lista(t) <= 2 and not parece_cortado(t)
-
-
-def lineas_de_lista(texto: str) -> int:
-    return len(_LINEA_DE_LISTA.findall(texto))
+    return (not es_fallo_guardado(t) and lineas_de_lista(t) <= 2 and not parece_cortado(t)
+            and not any(m.lower() in t.lower() for m in _MARCAS_INVALIDAS))
 
 
 def es_explicacion_valida(texto: str) -> bool:
-    """Prosa en parrafos: ni informes, ni listas, ni titulos, ni restos de imagenes."""
+    """Prosa en parrafos: ni informes, ni listas, ni titulos, ni texto bloqueado."""
     t = (texto or "").strip()
     if len(t) < 400:
         return False
-    if any(m.lower() in t.lower() for m in _MARCAS_INVALIDAS):
-        return False
-    if _BLOQUEO.search(t) or _META_SIEMPRE.search(t):
+    if any(m.lower() in t.lower() for m in _MARCAS_INVALIDAS) or _BLOQUEO.search(t):
         return False
     return lineas_de_lista(t) <= 2
 
@@ -490,7 +544,7 @@ class Config:
     max_clases: int = 1
     solo_curso: str = ""
     bloque_chars: int = 15000
-    paralelo: int = 5
+    paralelo: int = 3
     clases_a_la_vez: int = 1
     busqueda_web: bool = True
     borrar_chats: bool = True
@@ -575,10 +629,14 @@ class Api:
         if self.cfg.modelo:
             body["generationSpec"] = {"modelId": self.cfg.modelo}
         r = self.request("POST", self.url_asistente(), body, timeout=900, intentos=4)
-        if r.status_code == 400 and "toolsSpec" in body:
-            log("         (la busqueda web no esta activada en tu app de Gemini Enterprise; "
-                "se sigue sin ella)")
-            self.web = False
+        # Solo si el error dice que la app no admite la busqueda web se apaga (para todas las
+        # llamadas). Cualquier otro 400 es un error de esta llamada y no toca la busqueda web.
+        if (r.status_code == 400 and "toolsSpec" in body
+                and re.search(r"grounding|tools_?spec", r.text, re.I)):
+            if self.web:
+                self.web = False
+                log("         (tu app de Gemini Enterprise no tiene activada la busqueda web; "
+                    f"se sigue sin ella. Detalle: {r.text[:200]})")
             body.pop("toolsSpec")
             r = self.request("POST", self.url_asistente(), body, timeout=900, intentos=4)
         if not r.ok:
@@ -761,161 +819,255 @@ def _miles(n: int) -> str:
 
 def armar_prompt(paso: Paso, instr: dict, salidas: dict, clase: Clase, i: int, n: int,
                  nota: str = "") -> str:
+    cabecera = f'Clase: "{clase.base}" del curso "{clase.curso}".'
+    if n > 1:
+        cabecera += f" Esta es la parte {i} de {n} de la clase."
     partes = [instr["agente_principal"] if paso.clave == "6_agente_principal" else instr[paso.clave],
-              f'Clase: "{clase.base}" del curso "{clase.curso}".',
-              paso.tarea]
+              cabecera, paso.tarea]
     if paso.clave == "6_agente_principal":
-        largo = len(salidas["transcripcion"])
-        objetivo = max(1500, int(largo * 0.6) // 500 * 500)
-        partes.append(f"Extensión: no resumas. Como referencia, escribe unos {_miles(objetivo)} "
-                      f"caracteres o más (este fragmento de la clase tiene {_miles(largo)}).")
-        if n > 1:
-            pos = f"Este es el fragmento {i} de {n} de la clase."
-            if i > 1:
-                pos += (" Continúa la explicación: no vuelvas a presentar la clase ni a los "
-                        "profesores.")
-            if i < n:
-                pos += " No escribas una conclusión final: la clase sigue en el siguiente fragmento."
-            partes.append(pos)
+        if n > 1 and i > 1:
+            partes.append("Continúa la explicación de la parte anterior: no vuelvas a presentar "
+                          "la clase ni a los profesores.")
+        if n > 1 and i < n:
+            partes.append("No escribas una conclusión final: la clase sigue en la parte siguiente.")
     partes.append(PIE_COMUN)
     if paso.clave in PASOS_PROSA:
         partes.append(PIE_PROSA)
+    if paso.clave == "6_agente_principal":
+        partes.append(TAREA_TERMINOS)
     if nota:
         partes.append(nota)
     for clave in paso.entradas:
-        etiqueta = ETIQUETAS[clave].format(i=i, n=n)
-        partes.append(f"=== {etiqueta} ===\n{salidas[clave]}")
+        valor = (salidas.get(clave) or "").strip()
+        if valor:                   # en la primera parte no hay memoria ni parte anterior
+            partes.append(f"=== {ETIQUETAS[clave].format(i=i, n=n)} ===\n{valor}")
     return "\n\n".join(partes)
 
 
 class SinSintesis(RuntimeError):
-    """El agente principal no pudo escribir el borrador de este fragmento."""
+    """El agente principal no pudo escribir la explicacion de esta parte."""
 
 
-def ejecutar_paso(api: Api, paso: Paso, armar, prefijo: str, nota: str = "") -> str:
-    """Llama al subagente. Si el filtro de contenido bloquea o corta la respuesta, reintenta
-    (hasta 3 veces) pidiendo un lenguaje academico neutro."""
+@dataclass
+class Resultado:
+    texto: str      # lo que estaba dentro de <entregable>
+    crudo: str      # la respuesta completa (para leer <terminos>)
+
+
+def ejecutar_paso(api: Api, paso: Paso, armar, prefijo: str, nota: str = "") -> Resultado:
+    """Llama al subagente y devuelve solo su <entregable>. Si el filtro de contenido bloquea o
+    corta la respuesta, reintenta (hasta 3 veces) pidiendo describir lo delicado de forma
+    indirecta, sin cambiar el tono."""
     prosa = paso.clave in PASOS_PROSA
+    notas, sin_etiquetas = [], 0
     ultimo: Exception = Bloqueado("sin respuesta")
     for intento in range(1, 4):
         if PARAR.is_set():
             raise Interrumpido("detenido")
-        extra = "\n\n".join(x for x in (nota, NOTA_FILTRO if intento > 1 else "") if x)
+        extra = "\n\n".join(x for x in [nota] + notas if x)
         try:
-            texto = api.preguntar(armar(extra), web=paso.web).texto
-            texto = limpiar_respuesta(texto, prosa)
-            if not texto:
-                raise Bloqueado("respuesta vacia")
-            if prosa and parece_cortado(texto):
-                raise Bloqueado("la respuesta llego cortada")
-            return texto
+            crudo = api.preguntar(armar(extra), web=paso.web).texto
         except Bloqueado as e:
             ultimo = e
+            if NOTA_FILTRO not in notas:
+                notas.append(NOTA_FILTRO)
             if intento < 3:
-                log(f"{prefijo}   {e}; reintento {intento + 1}/3 con lenguaje academico neutro...")
+                log(f"{prefijo}   {e}; reintento {intento + 1}/3...")
                 time.sleep(10)
+            continue
+        texto, estado = extraer_entre(crudo, "entregable")
+        if estado == "cortado":
+            ultimo = Bloqueado("la respuesta llego cortada")
+            if NOTA_FILTRO not in notas:
+                notas.append(NOTA_FILTRO)
+            if intento < 3:
+                log(f"{prefijo}   la respuesta llego cortada; reintento {intento + 1}/3...")
+            continue
+        if estado == "sin_etiquetas":
+            sin_etiquetas += 1
+            if sin_etiquetas == 1 and intento < 3:
+                notas.append(NOTA_ETIQUETAS)
+                log(f"{prefijo}   la respuesta vino sin <entregable>; se pide de nuevo...")
+                continue
+        texto = limpiar_ligero(texto, prosa, sin_etiquetas=estado == "sin_etiquetas")
+        if not texto:
+            ultimo = Bloqueado("respuesta vacia")
+            continue
+        if prosa and parece_cortado(texto):
+            ultimo = Bloqueado("la respuesta llego cortada")
+            if NOTA_FILTRO not in notas:
+                notas.append(NOTA_FILTRO)
+            if intento < 3:
+                log(f"{prefijo}   la respuesta llego cortada; reintento {intento + 1}/3...")
+            continue
+        return Resultado(texto, crudo)
     raise ultimo
 
 
-def guardado_valido(clave: str, texto: str) -> bool:
-    if not texto.strip() or _BLOQUEO.search(texto):
-        return False
-    if clave in PASOS_PROSA and parece_cortado(limpiar_respuesta(texto, True)):
-        return False
-    return True
+def nombre_archivo(etiqueta: str, clave: str, version: int) -> str:
+    # Los pasos de la version 1 (1 a 3) conservan el nombre viejo para reutilizarlos.
+    return f"{etiqueta}_{clave}" + ("" if version == 1 else f".v{version}") + ".md"
+
+
+def no_resumir(api: Api, paso: Paso, armar, prefijo: str, resultado: str, referencia: str,
+               minimo: float) -> tuple[str, bool]:
+    """Un revisor puede quitar relleno, pero si borra demasiado se le pide otra vez; si
+    insiste, se conserva el texto anterior (y no se guarda como resultado del revisor)."""
+    if len(resultado) >= minimo * len(referencia):
+        return resultado, True
+    log(f"{prefijo}   {paso.nombre} quito demasiado contenido ({_miles(len(resultado))} de "
+        f"{_miles(len(referencia))} caracteres); se le pide de nuevo sin resumir...")
+    try:
+        otro = ejecutar_paso(api, paso, armar, prefijo, nota=NOTA_NO_RESUMAS).texto
+        if len(otro) >= minimo * len(referencia):
+            return otro, True
+    except Bloqueado:
+        pass
+    log(f"{prefijo}   se conserva el texto del paso anterior")
+    return referencia, False
 
 
 def procesar_bloque(api: Api, instr: dict, clase: Clase, texto: str, etiqueta: str,
-                    i: int, n: int, dir_pasos: str) -> str:
-    prefijo = f"   [{clase.corto} · fragmento {i}{etiqueta[3:]}/{n}]"
-    ruta_final = os.path.join(dir_pasos, f"{etiqueta}_final.md")
-    if os.path.exists(ruta_final) and fragmento_valido(leer(ruta_final)):
-        log(f"{prefijo} ya estaba terminado (se recupera de Drive)")
-        return leer(ruta_final).strip()
+                    i: int, n: int, dir_pasos: str, hasta: int = 8, memoria: str = "",
+                    anterior: str = "") -> tuple[str, str]:
+    """Pasa una parte de la clase por los pasos 1..hasta. Devuelve (explicacion, terminos)."""
+    prefijo = f"   [{clase.corto} · parte {i}{etiqueta[3:]}/{n}]"
+    ruta_final = os.path.join(dir_pasos, f"{etiqueta}_final.v{METODO}.md")
+    ruta_terminos = os.path.join(dir_pasos, f"{etiqueta}_terminos.v{METODO}.md")
+    if hasta == 8 and os.path.exists(ruta_final) and fragmento_valido(leer(ruta_final)):
+        log(f"{prefijo} ya estaba terminada (se recupera de Drive)")
+        return (leer(ruta_final).strip(),
+                leer(ruta_terminos).strip() if os.path.exists(ruta_terminos) else "")
 
-    salidas = {"transcripcion": texto}
-    rehacer_desde_aqui = False     # si se rehace un paso, los siguientes tambien
-    for k, paso in enumerate(PASOS, 1):
+    salidas = {"transcripcion": texto, "memoria": memoria, "anterior": anterior, "terminos": ""}
+    rehacer, completo = False, True     # completo = ningun paso fallo ni se reemplazo
+    for k, paso in enumerate(PASOS[:hasta], 1):
         if PARAR.is_set():
             raise Interrumpido("detenido")
         prosa = paso.clave in PASOS_PROSA
-        ruta = os.path.join(dir_pasos, f"{etiqueta}_{paso.clave}.md")
-        if not rehacer_desde_aqui and os.path.exists(ruta) and guardado_valido(paso.clave, leer(ruta)):
-            salidas[paso.clave] = limpiar_respuesta(leer(ruta), prosa)
+        ruta = os.path.join(dir_pasos, nombre_archivo(etiqueta, paso.clave, paso.version))
+        if not rehacer and os.path.exists(ruta) and not es_fallo_guardado(leer(ruta)) and not (
+                prosa and parece_cortado(leer(ruta))):
+            salidas[paso.clave] = limpiar_ligero(leer(ruta), prosa)
+            if paso.clave == "6_agente_principal" and os.path.exists(ruta_terminos):
+                salidas["terminos"] = leer(ruta_terminos).strip()
             log(f"{prefijo} paso {k}/8 {paso.nombre}: recuperado de Drive")
             continue
-        rehacer_desde_aqui = True
+        rehacer = True              # si se rehace un paso, los siguientes tambien
         log(f"{prefijo} paso {k}/8 {paso.nombre}..." + (" (con busqueda web)" if paso.web and api.web else ""))
         t0 = time.time()
 
         def armar(nota, paso=paso):
             return armar_prompt(paso, instr, salidas, clase, i, n, nota)
+        guardar = True
         try:
-            resultado = ejecutar_paso(api, paso, armar, prefijo)
-            if paso.clave == "6_agente_principal" and len(resultado) < 0.3 * len(texto):
-                log(f"{prefijo}   el borrador quedo muy corto ({_miles(len(resultado))} caracteres); "
-                    "se pide de nuevo completo...")
-                try:
-                    otro = ejecutar_paso(api, paso, armar, prefijo,
-                                         nota=NOTA_CORTO.format(largo=_miles(len(resultado))))
-                    resultado = max(resultado, otro, key=len)
-                except Bloqueado:
-                    pass
+            res = ejecutar_paso(api, paso, armar, prefijo)
+            resultado = res.texto
+            if paso.clave == "6_agente_principal":
+                if len(resultado) < 0.12 * len(texto):    # casi vacio: algo fallo
+                    log(f"{prefijo}   la explicacion quedo muy corta ({_miles(len(resultado))} "
+                        "caracteres); se pide de nuevo...")
+                    try:
+                        otro = ejecutar_paso(api, paso, armar, prefijo,
+                                             nota=NOTA_CORTO.format(largo=_miles(len(resultado))))
+                        if len(otro.texto) > len(resultado):
+                            res, resultado = otro, otro.texto
+                    except Bloqueado:
+                        pass
+                salidas["terminos"] = extraer_entre(res.crudo, "terminos")[0] \
+                    if "<terminos>" in res.crudo.lower() else ""
+            elif paso.clave == "7_format_enforcer":
+                resultado, guardar = no_resumir(api, paso, armar, prefijo, resultado,
+                                                salidas["6_agente_principal"], 0.4)
+            elif paso.clave == "8_vocabulary_checker":
+                resultado, guardar = no_resumir(api, paso, armar, prefijo, resultado,
+                                                salidas["7_format_enforcer"], 0.6)
         except Bloqueado as e:
+            guardar = False         # un fallo nunca se guarda: la proxima vez se reintenta
             if k <= 5:
                 log(f"{prefijo}   {paso.nombre} no devolvio nada ({e}); se sigue sin su aporte")
-                resultado = f"({paso.nombre} no devolvio resultado para este fragmento.)"
+                resultado = f"({paso.nombre} no devolvio resultado para esta parte.)"
             elif paso.clave == "6_agente_principal":
                 raise SinSintesis(str(e))
             else:
-                anterior = PASOS[k - 2].clave
                 log(f"{prefijo}   {paso.nombre} no devolvio nada ({e}); se usa el texto del paso anterior")
-                resultado = salidas[anterior]
-
-        # Un revisor no deberia acortar el texto: si lo hace, se conserva el anterior.
-        if paso.clave == "7_format_enforcer" and len(resultado) < 0.6 * len(salidas["6_agente_principal"]):
-            log(f"{prefijo}   el Format Enforcer acorto demasiado el texto; se conserva el borrador")
-            resultado = salidas["6_agente_principal"]
-        if paso.clave == "8_vocabulary_checker" and len(resultado) < 0.75 * len(salidas["7_format_enforcer"]):
-            log(f"{prefijo}   el Vocabulary Checker acorto demasiado el texto; se conserva el anterior")
-            resultado = salidas["7_format_enforcer"]
+                resultado = salidas[PASOS[k - 2].clave]
 
         salidas[paso.clave] = resultado
-        escribir(ruta, resultado)
+        if guardar:
+            escribir(ruta, resultado)
+            if paso.clave == "6_agente_principal":
+                escribir(ruta_terminos, salidas["terminos"])
+        else:
+            completo = False
         log(f"{prefijo}   listo en {int(time.time() - t0)} s ({_miles(len(resultado))} caracteres)")
 
+    if hasta < 8:
+        return "", ""
     final = salidas["8_vocabulary_checker"]
     if lineas_de_lista(final) > 2:
         log(f"{prefijo} quedaron listas; pasada extra del Format Enforcer...")
         extra = PASOS[6]
         try:
             otro = ejecutar_paso(api, extra, lambda nota: armar_prompt(
-                extra, instr, {"6_agente_principal": final}, clase, i, n, nota), prefijo)
-            if len(otro) >= 0.75 * len(final):
+                extra, instr, {"6_agente_principal": final}, clase, i, n, nota), prefijo).texto
+            if len(otro) >= 0.6 * len(final):
                 final = otro
         except Bloqueado:
             pass
         final = quitar_formato(final)
-    escribir(ruta_final, final)
-    return final.strip()
+    terminos = salidas["terminos"] or salidas.get("2_concept_analyzer", "")[:1500]
+    if completo:
+        escribir(ruta_final, final)
+    return final.strip(), terminos
 
 
 def procesar_bloque_dividiendo(api: Api, instr: dict, clase: Clase, texto: str, etiqueta: str,
-                               i: int, n: int, dir_pasos: str) -> str:
-    """Si el agente principal no puede con un fragmento, lo parte en dos y lo intenta otra vez."""
+                               i: int, n: int, dir_pasos: str, memoria: str,
+                               anterior: str) -> tuple[str, str]:
+    """Si el agente principal no puede con una parte, la parte en dos y lo intenta otra vez."""
     try:
-        return procesar_bloque(api, instr, clase, texto, etiqueta, i, n, dir_pasos)
+        return procesar_bloque(api, instr, clase, texto, etiqueta, i, n, dir_pasos,
+                               memoria=memoria, anterior=anterior)
     except SinSintesis as e:
-        prefijo = f"   [{clase.corto} · fragmento {i}{etiqueta[3:]}/{n}]"
+        prefijo = f"   [{clase.corto} · parte {i}{etiqueta[3:]}/{n}]"
         if len(texto) < 3000:
             log(f"{prefijo} no se pudo explicar ni en trozos pequenos ({e}); se deja una nota "
                 "en la explicacion y se sigue")
-            return NOTA_PARTE_BLOQUEADA
-        log(f"{prefijo} el agente principal no pudo con este fragmento ({e}); se divide en dos mitades")
-        mitades = dividir_en_bloques(texto, len(texto) // 2 + 200)
-        return "\n\n".join(
-            procesar_bloque_dividiendo(api, instr, clase, m, etiqueta + "abcdefgh"[j], i, n, dir_pasos)
-            for j, m in enumerate(mitades))
+            return NOTA_PARTE_BLOQUEADA, ""
+        log(f"{prefijo} el agente principal no pudo con esta parte ({e}); se divide en dos mitades")
+        textos, terminos = [], []
+        for j, mitad in enumerate(dividir_en_bloques(texto, len(texto) // 2 + 200)):
+            t, term = procesar_bloque_dividiendo(
+                api, instr, clase, mitad, etiqueta + "abcdefgh"[j], i, n, dir_pasos,
+                unir_memoria([memoria] + terminos), textos[-1] if textos else anterior)
+            textos.append(t)
+            terminos.append(term)
+        return "\n\n".join(textos), "\n".join(x for x in terminos if x)
+
+
+def unir_memoria(partes: list[str], maximo: int = 4000) -> str:
+    """Lista de conceptos ya explicados (los mas recientes si es muy larga)."""
+    lineas, vistas = [], set()
+    for p in partes:
+        for l in (p or "").splitlines():
+            clave = l.split(":", 1)[0].strip(" -*•").lower()
+            if l.strip() and clave not in vistas:
+                vistas.add(clave)
+                lineas.append(l.strip(" -*•"))
+    texto = "\n".join(lineas)
+    return texto[-maximo:].split("\n", 1)[-1] if len(texto) > maximo else texto
+
+
+def cola(texto: str, maximo: int = 800) -> str:
+    """Los ultimos parrafos de la parte anterior, para continuar con fluidez."""
+    parrafos, total = [], 0
+    for pa in reversed([p for p in texto.split("\n\n") if p.strip()]):
+        if parrafos and total + len(pa) > maximo:
+            break
+        parrafos.insert(0, pa.strip())
+        total += len(pa)
+    return "\n\n".join(parrafos)[-maximo * 2:]
 
 
 def en_paralelo(func, items: list, hilos: int) -> list:
@@ -931,55 +1083,75 @@ def en_paralelo(func, items: list, hilos: int) -> list:
         ex.shutdown(wait=False, cancel_futures=True)
 
 
+def dir_pasos_de(cfg: Config, clase: Clase) -> str:
+    return os.path.join(cfg.carpeta, CARPETA_INTERNA, "pasos", limpiar_nombre(clase.curso),
+                        limpiar_nombre(clase.base))
+
+
+def leer_plan(dir_pasos: str) -> dict:
+    ruta = os.path.join(dir_pasos, "plan.json")
+    try:
+        return json.loads(leer(ruta)) if os.path.exists(ruta) else {}
+    except ValueError:
+        return {}
+
+
 def explicar_clase(api: Api, cfg: Config, instr: dict, clase: Clase, transcripcion: str) -> str:
     pre = f"   [{clase.corto}]"
-    dir_pasos = os.path.join(cfg.carpeta, CARPETA_INTERNA, "pasos", limpiar_nombre(clase.curso),
-                             limpiar_nombre(clase.base))
+    dir_pasos = dir_pasos_de(cfg, clase)
+    plan_previo = leer_plan(dir_pasos)
     if os.path.exists(clase.ruta_explicacion):
         previo = leer(clase.ruta_explicacion)
-        if es_explicacion_valida(previo) and not cfg.rehacer:
+        al_dia = plan_previo.get("explicacion_metodo") == METODO
+        if es_explicacion_valida(previo) and al_dia and not cfg.rehacer:
             log(f"{pre} explicacion en espanol ya hecha (se reutiliza)")
             return previo
         motivo = ("se pidio rehacerla" if cfg.rehacer else
-                  "era un informe, tenia listas, saludos del asistente o un texto bloqueado")
+                  "se hizo con una version anterior del metodo" if not al_dia else
+                  "era un informe, tenia listas o un texto bloqueado")
         respaldo = os.path.join(dir_pasos, f"version_anterior_{time.strftime('%Y%m%d-%H%M%S')}.txt")
         os.makedirs(dir_pasos, exist_ok=True)
         shutil.move(clase.ruta_explicacion, respaldo)
-        log(f"{pre} la explicacion anterior no sirve ({motivo}); se guardo en {respaldo}")
+        log(f"{pre} la explicacion anterior se rehace ({motivo}); se guardo en {respaldo}")
 
     bloques = dividir_en_bloques(transcripcion, cfg.bloque_chars)
     plan = {"transcripcion": sha(transcripcion), "bloque_chars": cfg.bloque_chars,
             "bloques": len(bloques)}
-    ruta_plan = os.path.join(dir_pasos, "plan.json")
-    if os.path.exists(ruta_plan):
-        anterior = json.loads(leer(ruta_plan))
-        if anterior != plan or cfg.rehacer:
-            # Los pasos guardados son de otra division del texto: se empieza de cero.
-            for f in os.listdir(dir_pasos):
-                if f.startswith("b") and f.endswith(".md"):
-                    os.remove(os.path.join(dir_pasos, f))
-    escribir(ruta_plan, json.dumps(plan, indent=2))
+    if os.path.isdir(dir_pasos) and ({k: plan_previo.get(k) for k in plan} != plan or cfg.rehacer):
+        # Los pasos guardados son de otra division del texto: se empieza de cero.
+        for f in os.listdir(dir_pasos):
+            if f.startswith("b") and f.endswith(".md"):
+                os.remove(os.path.join(dir_pasos, f))
+    escribir(os.path.join(dir_pasos, "plan.json"), json.dumps(plan, indent=2))
+    n = len(bloques)
 
-    a_la_vez = max(1, min(cfg.paralelo, len(bloques)))
-    log(f"{pre} {_miles(len(transcripcion))} caracteres -> {len(bloques)} fragmentos de unos 20 "
-        f"minutos; cada uno pasa por los 8 pasos ({a_la_vez} fragmento(s) a la vez).\n"
+    # Fase 1: la investigacion (pasos 1-3) no depende de las otras partes: va en paralelo.
+    log(f"{pre} {_miles(len(transcripcion))} caracteres -> {n} partes de unos 20 minutos.\n"
+        f"{pre} Fase 1: investigacion (Deep Researcher, Concept Analyzer, Contextualizer) de las "
+        f"{n} partes, {max(1, min(cfg.paralelo, n))} a la vez.\n"
         f"{pre} Lo que entrega cada subagente se guarda en: {dir_pasos}")
-    listos = []
-    lock = threading.Lock()
+    en_paralelo(lambda ib: procesar_bloque(api, instr, clase, ib[1], f"b{ib[0]:02d}", ib[0], n,
+                                           dir_pasos, hasta=3),
+                list(enumerate(bloques, 1)), cfg.paralelo)
 
-    def uno(args):
-        i, b = args
-        parte = procesar_bloque_dividiendo(api, instr, clase, b, f"b{i:02d}", i, len(bloques),
-                                           dir_pasos)
-        with lock:
-            listos.append(i)
-            log(f"{pre} fragmento {i}/{len(bloques)} terminado (listos: {len(listos)} de "
-                f"{len(bloques)})")
-        return parte
+    # Fase 2: analogias, jerga y redaccion, EN ORDEN: cada parte sabe que conceptos ya se
+    # explicaron y como termino la anterior, para no repetir definiciones.
+    log(f"{pre} Fase 2: analogias, jerga y redaccion, parte por parte en orden.")
+    partes, memorias = [], []
+    for i, b in enumerate(bloques, 1):
+        if PARAR.is_set():
+            raise Interrumpido("detenido")
+        texto, terminos = procesar_bloque_dividiendo(
+            api, instr, clase, b, f"b{i:02d}", i, n, dir_pasos,
+            memoria=unir_memoria(memorias), anterior=cola(partes[-1]) if partes else "")
+        partes.append(texto)
+        memorias.append(terminos)
+        log(f"{pre} parte {i}/{n} terminada")
 
-    partes = en_paralelo(uno, list(enumerate(bloques, 1)), a_la_vez)
     explicacion = "\n\n".join(p.strip() for p in partes if p.strip()) + "\n"
     escribir(clase.ruta_explicacion, explicacion)
+    plan["explicacion_metodo"] = METODO
+    escribir(os.path.join(dir_pasos, "plan.json"), json.dumps(plan, indent=2))
     log(f"{pre} explicacion guardada: {os.path.basename(clase.ruta_explicacion)} "
         f"({_miles(len(explicacion))} caracteres)")
     return explicacion
@@ -1102,16 +1274,36 @@ def buscar_clases(carpeta: str, solo_curso: str = "") -> list[Clase]:
 
 
 def cargar_instrucciones(cfg: Config) -> dict:
+    """Usa las instrucciones del script, salvo las que TU editaste en instrucciones_agentes.json.
+    Asi, si el script trae instrucciones nuevas, se usan sin pisar tus cambios."""
     ruta = os.path.join(cfg.carpeta, CARPETA_INTERNA, INSTRUCCIONES)
-    instr = dict(INSTRUCCIONES_POR_DEFECTO)
+    datos = {}
     if os.path.exists(ruta):
         try:
-            propias = json.loads(leer(ruta))
-            instr.update({k: v for k, v in propias.items() if k in instr and str(v).strip()})
+            datos = json.loads(leer(ruta))
         except ValueError as e:
-            log(f"(no se pudo leer {ruta}: {e}; se usan las instrucciones por defecto)")
-    else:
-        escribir(ruta, json.dumps(INSTRUCCIONES_POR_DEFECTO, indent=2, ensure_ascii=False))
+            log(f"(no se pudo leer {ruta}: {e}; se usan las instrucciones del script)")
+            datos = {}
+    original = datos.get("_original_del_script") or {}
+    instr, editadas = dict(INSTRUCCIONES_POR_DEFECTO), []
+    for clave, defecto in INSTRUCCIONES_POR_DEFECTO.items():
+        valor = datos.get(clave)
+        if not isinstance(valor, str) or not valor.strip():
+            continue
+        conocidas = [defecto, original.get(clave) or "", *DEFECTOS_ANTERIORES.get(clave, [])]
+        if valor.strip() in {c.strip() for c in conocidas}:
+            continue                    # no la editaste: vale la version actual del script
+        instr[clave] = valor
+        editadas.append(clave)
+    nuevo = {"_ayuda": "Edita el texto de cualquier subagente y se usara tu version. No toques "
+                       "_original_del_script: sirve para saber que cambiaste tu.",
+             **{k: instr[k] for k in INSTRUCCIONES_POR_DEFECTO},
+             "_original_del_script": INSTRUCCIONES_POR_DEFECTO}
+    if nuevo != datos:
+        escribir(ruta, json.dumps(nuevo, indent=2, ensure_ascii=False))
+    if editadas:
+        log(f"Se usan tus instrucciones editadas para: {', '.join(editadas)}")
+    elif not datos:
         log(f"Instrucciones de los subagentes guardadas en {ruta} (puedes editarlas ahi).")
     return instr
 
@@ -1119,6 +1311,8 @@ def cargar_instrucciones(cfg: Config) -> dict:
 def clase_completa(cfg: Config, clase: Clase, reg: Registro) -> bool:
     if cfg.rehacer or not os.path.exists(clase.ruta_explicacion):
         return False
+    if leer_plan(dir_pasos_de(cfg, clase)).get("explicacion_metodo") != METODO:
+        return False                    # hecha con una version anterior: se rehace
     texto = leer(clase.ruta_explicacion)
     if not es_explicacion_valida(texto):
         return False
@@ -1283,7 +1477,8 @@ def main(argv=None) -> int:
     p.add_argument("--max-clases", type=int, default=1, help="0 = todas")
     p.add_argument("--solo-curso", default="", help="solo rutas que contengan este texto")
     p.add_argument("--bloque-chars", type=int, default=15000)
-    p.add_argument("--paralelo", type=int, default=5, help="fragmentos de una clase a la vez")
+    p.add_argument("--paralelo", type=int, default=3,
+                   help="partes de una clase investigadas a la vez (fase 1)")
     p.add_argument("--clases-a-la-vez", type=int, default=1, help="clases procesadas a la vez")
     p.add_argument("--sin-busqueda-web", action="store_true")
     p.add_argument("--conservar-chats", action="store_true",

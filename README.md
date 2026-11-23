@@ -150,12 +150,16 @@ Si editas el script, ejecuta `python build_dce_notebook.py` para regenerar el no
 
 Usa las transcripciones `.txt` (en inglés) que deja `dce_downloader.py`. Para cada clase de cada curso:
 
-1. Divide la transcripción en fragmentos de ~15.000 caracteres (unos 20 minutos de clase) y pasa cada
-   fragmento por los 7 subagentes del *Topic Simplifier Agent* y por el agente principal, **en orden**:
+1. Divide la transcripción en partes de ~15.000 caracteres (unos 20 minutos de clase) y pasa cada
+   parte por los 7 subagentes del *Topic Simplifier Agent* y por el agente principal, **en orden**:
    Deep Researcher → Concept Analyzer → Contextualizer → Analogy Creator → Jargon Buster →
-   agente principal (síntesis) → Format Enforcer → Vocabulary Checker.
-   Cada paso es una llamada al asistente de Gemini Enterprise (`streamAssist`) con las instrucciones
-   de ese subagente y lo que entregaron los pasos anteriores.
+   agente principal (redacta) → Format Enforcer → Vocabulary Checker.
+   La investigación (pasos 1–3) de todas las partes va en paralelo. La redacción (pasos 4–8) va parte por
+   parte, en orden: cada parte recibe la lista de conceptos ya explicados y el final de la anterior, así
+   no se repiten definiciones ni analogías. El Analogy Creator recibe la transcripción y la investigación,
+   para que sus analogías encajen con los ejemplos del profesor.
+   Cada paso es una llamada al asistente de Gemini Enterprise (`streamAssist`). El asistente escribe su
+   resultado entre `<entregable>` y `</entregable>`; lo de afuera (saludos, preguntas) se descarta sin tocar el texto.
 2. Guarda la explicación final: `Clases/<curso>/L01 - 2026-01-27 - Lecture_simplificado_es.txt`.
 3. Crea el cuaderno `HIST E-1900 · L01 - 2026-01-27 - Lecture` en Gemini Notebook (NotebookLM Enterprise)
    con 2 fuentes (transcripción + explicación) y pide el Audio Overview en español.
@@ -183,11 +187,15 @@ Hay un solo audio por cuaderno, y no se puede descargar por la API: aparece en e
   audios que falten se piden en la siguiente ejecución.
 - **Cuadernos repetidos** de pruebas anteriores: `--limpiar` los lista, y `--limpiar --borrar` los borra.
 - **Filtro de contenido:** a veces Gemini Enterprise bloquea o corta una respuesta ("This response was
-  blocked by your organization's content policy"). El script lo detecta y reintenta con lenguaje académico
-  neutro. Si no funciona, parte el fragmento en dos, y como último recurso deja una nota en la explicación.
-- **Respuestas de chat:** se quitan los saludos, los comentarios del asistente ("Aquí tienes…", "¿Qué te
-  parece…?"), los emojis y los títulos markdown. Un paso que llegó cortado o bloqueado se rehace, y también los siguientes.
-- **Velocidad:** `--paralelo` (fragmentos de una clase a la vez, 5 por defecto) y `--clases-a-la-vez`.
+  blocked by your organization's content policy"). El script lo detecta y reintenta pidiendo describir solo
+  lo delicado de forma indirecta, sin cambiar el tono. Si no funciona, divide la parte en dos, y como último
+  recurso deja una nota en la explicación.
+- **Fallos:** un paso que falló nunca se guarda, así que se vuelve a intentar. Si un revisor (pasos 7 y 8) quita
+  demasiado contenido, se le pide otra vez. La búsqueda web solo se apaga si la app dice que no la tiene activada.
+- **Versiones:** si una explicación se hizo con una versión anterior del método, se rehace sola
+  (la investigación de los pasos 1–3 se reutiliza). En `instrucciones_agentes.json` se respetan los textos que
+  editaste; los demás se actualizan con el script.
+- **Velocidad:** `--paralelo` (partes investigadas a la vez, 3 por defecto) y `--clases-a-la-vez`.
   Al detener la celda, se para de verdad y conserva lo hecho.
 
 ```bash
