@@ -156,6 +156,16 @@ INSTRUCCIONES_POR_DEFECTO = {
         "agregue claridad sin agregar complejidad, manteniendo el significado original. Devuelve "
         "únicamente el texto mejorado, sin introducciones ni despedidas."
     ),
+    # Las reglas que diste para la explicacion: se aplican al redactar y en cada revision.
+    "reglas_de_estilo": (
+        "Actúa como un simplificador experto para alguien sin conocimientos técnicos previos. "
+        "Escribe todo exclusivamente en párrafos fluidos de lectura rápida, usando oraciones "
+        "cortas y directas. No uses viñetas, listas ni numeración en ninguna parte de la "
+        "respuesta. Explica qué encontraste usando solo hechos exactos y cifras concretas, sin "
+        "suposiciones ni palabras vagas. Cuando menciones términos técnicos tradúcelos de forma "
+        "natural al lenguaje cotidiano, incluye una analogía sencilla de la vida diaria y explica "
+        "para qué sirve cada cosa."
+    ),
 }
 
 # Textos por defecto que tuvieron versiones anteriores del script. Si tu
@@ -175,8 +185,9 @@ ENFOQUE_AUDIO = (
 )
 
 
-# Version del metodo. Las explicaciones hechas con una version anterior se rehacen.
-METODO = 3
+# Version del metodo. Las explicaciones hechas con una version anterior se rehacen
+# (reutilizando lo guardado de los pasos cuya version no cambio).
+METODO = 4
 
 
 @dataclass
@@ -187,6 +198,11 @@ class Paso:
     entradas: list
     tarea: str
     version: int = 1    # si cambia, los resultados guardados de este paso se rehacen
+    rol: str = ""       # que instrucciones de instrucciones_agentes.json usa (por defecto, clave)
+
+    @property
+    def instrucciones(self) -> str:
+        return self.rol or self.clave
 
 
 PASOS = [
@@ -212,36 +228,57 @@ PASOS = [
          "Traduce al español de todos los días cada término técnico, palabra de jerga y frase "
          "formal de esta parte de la clase, y explica qué hace en la práctica. No repitas los "
          "conceptos que ya se explicaron en partes anteriores.", version=3),
-    Paso("6_agente_principal", "Agente principal (síntesis)", False,
-         ["memoria", "anterior", "transcripcion", "1_deep_researcher", "2_concept_analyzer",
-          "3_contextualizer", "4_analogy_creator", "5_jargon_buster"],
+    Paso("6_agente_principal", "Agente principal (redacta)", False,
+         ["reglas_de_estilo", "memoria", "anterior", "transcripcion", "1_deep_researcher",
+          "2_concept_analyzer", "3_contextualizer", "4_analogy_creator", "5_jargon_buster"],
          "Ya recibiste los resultados de tus 5 primeros subagentes. Escribe la explicación de "
-         "ESTA parte de la clase, siguiendo el orden en que el profesor presentó los temas. "
-         "Escribe como un buen profesor particular que le cuenta la clase a un amigo que no sabe "
-         "nada del tema: en tercera persona sobre lo que dijo el profesor (\"el profesor "
-         "explica que...\"), nunca como si fueras el profesor ni en primera persona del plural. "
-         "Explica todo lo que se enseñó, sin relleno ni frases decorativas. Lo administrativo "
-         "(micrófonos, saludos, avisos) va en una frase como mucho; lo importante del curso (de "
-         "qué trata, cómo se evalúa) sí explícalo. Cada concepto difícil lleva su explicación "
-         "sencilla (del Jargon Buster), su porqué (del Contextualizer) y su analogía (del "
-         "Analogy Creator). Usa los hechos exactos del Deep Researcher, con los nombres y las "
-         "cifras corregidos. Los conceptos que ya se explicaron en partes anteriores solo se "
-         "nombran, sin volver a definirlos. Oraciones cortas (unas 20 palabras como máximo) y "
-         "palabras de uso diario. Solo párrafos de prosa: sin listas, viñetas, títulos ni "
-         "imágenes.", version=3),
-    Paso("7_format_enforcer", "Format Enforcer", False, ["6_agente_principal"],
-         "Reescribe el texto de abajo para que sea muy fácil de leer: divide toda oración de más "
-         "de unas 20 palabras en oraciones más cortas y cambia las construcciones complicadas por "
-         "otras simples. Puedes quitar frases de relleno, pero conserva todas las explicaciones, "
-         "datos, nombres, cifras y analogías. Mantén el tono cercano y sencillo.", version=3),
-    Paso("8_vocabulary_checker", "Vocabulary Checker", False, ["7_format_enforcer"],
-         "Cambia solo las palabras genéricas o vagas (cosas, hacer, bueno, malo, algo, tema...) "
-         "por palabras concretas pero sencillas, de las que se usan todos los días. No cambies "
-         "palabras simples por otras cultas o técnicas, no alargues las oraciones y no quites "
-         "contenido. Devuelve el texto completo.", version=3),
+         "ESTA parte de la clase, siguiendo el orden en que el profesor presentó los temas y "
+         "cumpliendo las reglas de estilo del usuario. Escribe como un buen profesor particular "
+         "que le cuenta la clase a un amigo que no sabe nada del tema: en tercera persona sobre "
+         "lo que dijo el profesor (\"el profesor explica que...\"), nunca como si fueras el "
+         "profesor ni con \"nosotros\". Explica todo lo que se enseñó, sin relleno ni frases "
+         "decorativas. Lo administrativo (micrófonos, saludos, avisos) va en una frase como "
+         "mucho; lo importante del curso (de qué trata, cómo se evalúa) sí explícalo. La primera "
+         "vez que aparece un término técnico, tradúcelo al lenguaje de todos los días (usa la "
+         "traducción del Jargon Buster), da su analogía (del Analogy Creator) y di para qué "
+         "sirve y por qué importa (del Contextualizer); después úsalo con naturalidad. Usa los "
+         "hechos exactos del Deep Researcher, con los nombres y las cifras corregidos. Los "
+         "conceptos que ya se explicaron en partes anteriores solo se nombran, sin volver a "
+         "definirlos. No menciones que la clase está dividida en partes (nada de \"en esta "
+         "parte\" ni \"esta sección\"): el lector verá una sola explicación continua. Párrafos "
+         "fluidos de oraciones cortas y palabras de uso diario: sin listas, viñetas, títulos ni "
+         "imágenes.", version=4, rol="agente_principal"),
+    Paso("6b_jerga_en_borrador", "Jargon Buster (revisa el borrador)", False,
+         ["reglas_de_estilo", "memoria", "6_agente_principal"],
+         "Revisa el texto de abajo, que ya está en español, y busca las palabras técnicas, "
+         "cultas o formales que una persona sin estudios del tema no usaría al hablar con un "
+         "amigo (por ejemplo: efigie, teocracia, vestigios, anverso, prócer, lúdico, "
+         "transfronterizo, metrológico, epigráfico, hidrodinámica, sesgo, legitimar, "
+         "paradigma, hegemonía). Si es un concepto que la clase enseña y hay que aprender, "
+         "déjalo, pero la primera vez explícalo con palabras simples y di para qué sirve (si ya "
+         "está en la lista de conceptos ya explicados, no lo vuelvas a explicar). Si no, cámbialo "
+         "por una palabra de todos los días (efigie: retrato; vestigios: restos; anverso: la cara "
+         "de la moneda; lúdico: de juego). No cambies nada más: devuelve el texto completo, con "
+         "los mismos párrafos, datos y analogías.", version=4, rol="5_jargon_buster"),
+    Paso("7_format_enforcer", "Format Enforcer", False,
+         ["reglas_de_estilo", "6b_jerga_en_borrador"],
+         "Reescribe el texto de abajo para que se lea rápido y con fluidez: oraciones de 10 a 20 "
+         "palabras, ninguna de más de 25. Cada oración debe tener sentido completo por sí sola: "
+         "no la partas en trozos sueltos (\"Depende de los restos...\", \"Es como pensarlo "
+         "porque...\"). Une las ideas con conectores sencillos (por eso, entonces, además, pero, "
+         "o sea) y no empieces varias oraciones seguidas igual (\"Es como...\", \"El "
+         "profesor...\"). Mantén la tercera persona, el tono cercano y todas las explicaciones, "
+         "datos, nombres, cifras y analogías. Puedes quitar frases de relleno.", version=4),
+    Paso("8_vocabulary_checker", "Vocabulary Checker", False,
+         ["reglas_de_estilo", "7_format_enforcer"],
+         "Cambia solo las palabras genéricas o vagas (cosas, hacer, bueno, malo, algo, tema, "
+         "elemento, aspecto...) por palabras concretas pero sencillas, de las que se usan todos "
+         "los días. Nunca cambies una palabra simple por otra culta o técnica. No alargues las "
+         "oraciones ni quites contenido. Devuelve el texto completo.", version=4),
 ]
 
 ETIQUETAS = {
+    "reglas_de_estilo": "REGLAS DE ESTILO DEL USUARIO (obligatorias para todo el texto)",
     "memoria": "CONCEPTOS YA EXPLICADOS EN PARTES ANTERIORES DE LA CLASE (no los vuelvas a "
                "definir ni les inventes otra analogía; si aparecen, solo nómbralos)",
     "anterior": "FINAL DE LA PARTE ANTERIOR DE LA EXPLICACIÓN (continúa desde aquí con fluidez, "
@@ -252,7 +289,8 @@ ETIQUETAS = {
     "3_contextualizer": "CONTEXTO Y MOTIVOS (CONTEXTUALIZER)",
     "4_analogy_creator": "ANALOGÍAS (ANALOGY CREATOR)",
     "5_jargon_buster": "JERGA TRADUCIDA (JARGON BUSTER)",
-    "6_agente_principal": "TEXTO A REESCRIBIR",
+    "6_agente_principal": "TEXTO A REVISAR (BORRADOR)",
+    "6b_jerga_en_borrador": "TEXTO A REESCRIBIR",
     "7_format_enforcer": "TEXTO A REVISAR",
 }
 
@@ -305,7 +343,13 @@ NOTA_PARTE_BLOQUEADA = (
     "bloqueó la respuesta. Consulta la transcripción original.)"
 )
 
-PASOS_PROSA = {"6_agente_principal", "7_format_enforcer", "8_vocabulary_checker"}
+PASOS_PROSA = {"6_agente_principal", "6b_jerga_en_borrador", "7_format_enforcer",
+               "8_vocabulary_checker"}
+TOTAL_PASOS = len(PASOS)
+
+
+def paso_por_clave(clave: str) -> Paso:
+    return next(p for p in PASOS if p.clave == clave)
 
 # --------------------------------------------------------------------------
 # Utilidades
@@ -314,9 +358,29 @@ PASOS_PROSA = {"6_agente_principal", "7_format_enforcer", "8_vocabulary_checker"
 _print_lock = threading.Lock()
 
 
+DETALLE = threading.Event()     # con detalle se muestra cada paso de cada parte
+
+
 def log(msg: str) -> None:
     with _print_lock:
         print(msg, flush=True)
+
+
+def detalle(msg: str) -> None:
+    if DETALLE.is_set():
+        log(msg)
+
+
+def legibilidad(texto: str) -> str:
+    """Medida simple: palabras por oracion y % de palabras largas (12 letras o mas)."""
+    oraciones = [o for o in re.split(r"(?<=[.!?])\s+", texto) if re.search(r"\w", o)]
+    palabras = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", texto)
+    if not oraciones or not palabras:
+        return "sin texto"
+    largas = sum(1 for w in palabras if len(w) >= 12) / len(palabras)
+    maximo = max(len(re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", o)) for o in oraciones)
+    return (f"{len(palabras) / len(oraciones):.0f} palabras por oración, la más larga {maximo}, "
+            f"{largas:.0%} palabras largas")
 
 
 def sha(texto: str) -> str:
@@ -543,6 +607,8 @@ class Config:
     modelo: str = ""
     max_clases: int = 1
     solo_curso: str = ""
+    curso: str = ""                 # nombre exacto de la carpeta del curso (vacio = todos)
+    detalle: bool = False
     bloque_chars: int = 15000
     paralelo: int = 3
     clases_a_la_vez: int = 1
@@ -822,8 +888,7 @@ def armar_prompt(paso: Paso, instr: dict, salidas: dict, clase: Clase, i: int, n
     cabecera = f'Clase: "{clase.base}" del curso "{clase.curso}".'
     if n > 1:
         cabecera += f" Esta es la parte {i} de {n} de la clase."
-    partes = [instr["agente_principal"] if paso.clave == "6_agente_principal" else instr[paso.clave],
-              cabecera, paso.tarea]
+    partes = [instr[paso.instrucciones], cabecera, paso.tarea]
     if paso.clave == "6_agente_principal":
         if n > 1 and i > 1:
             partes.append("Continúa la explicación de la parte anterior: no vuelvas a presentar "
@@ -838,7 +903,8 @@ def armar_prompt(paso: Paso, instr: dict, salidas: dict, clase: Clase, i: int, n
     if nota:
         partes.append(nota)
     for clave in paso.entradas:
-        valor = (salidas.get(clave) or "").strip()
+        valor = (instr.get(clave) if clave == "reglas_de_estilo" else salidas.get(clave)) or ""
+        valor = valor.strip()
         if valor:                   # en la primera parte no hay memoria ni parte anterior
             partes.append(f"=== {ETIQUETAS[clave].format(i=i, n=n)} ===\n{valor}")
     return "\n\n".join(partes)
@@ -909,6 +975,10 @@ def nombre_archivo(etiqueta: str, clave: str, version: int) -> str:
     return f"{etiqueta}_{clave}" + ("" if version == 1 else f".v{version}") + ".md"
 
 
+# Cuanto texto puede quitar cada revisor (respecto al paso anterior) antes de pedirselo de nuevo.
+MINIMO_REVISOR = {"6b_jerga_en_borrador": 0.6, "7_format_enforcer": 0.4, "8_vocabulary_checker": 0.6}
+
+
 def no_resumir(api: Api, paso: Paso, armar, prefijo: str, resultado: str, referencia: str,
                minimo: float) -> tuple[str, bool]:
     """Un revisor puede quitar relleno, pero si borra demasiado se le pide otra vez; si
@@ -928,14 +998,14 @@ def no_resumir(api: Api, paso: Paso, armar, prefijo: str, resultado: str, refere
 
 
 def procesar_bloque(api: Api, instr: dict, clase: Clase, texto: str, etiqueta: str,
-                    i: int, n: int, dir_pasos: str, hasta: int = 8, memoria: str = "",
+                    i: int, n: int, dir_pasos: str, hasta: int = TOTAL_PASOS, memoria: str = "",
                     anterior: str = "") -> tuple[str, str]:
     """Pasa una parte de la clase por los pasos 1..hasta. Devuelve (explicacion, terminos)."""
     prefijo = f"   [{clase.corto} · parte {i}{etiqueta[3:]}/{n}]"
     ruta_final = os.path.join(dir_pasos, f"{etiqueta}_final.v{METODO}.md")
     ruta_terminos = os.path.join(dir_pasos, f"{etiqueta}_terminos.v{METODO}.md")
-    if hasta == 8 and os.path.exists(ruta_final) and fragmento_valido(leer(ruta_final)):
-        log(f"{prefijo} ya estaba terminada (se recupera de Drive)")
+    if hasta >= TOTAL_PASOS and os.path.exists(ruta_final) and fragmento_valido(leer(ruta_final)):
+        detalle(f"{prefijo} ya estaba terminada (se recupera de Drive)")
         return (leer(ruta_final).strip(),
                 leer(ruta_terminos).strip() if os.path.exists(ruta_terminos) else "")
 
@@ -951,10 +1021,11 @@ def procesar_bloque(api: Api, instr: dict, clase: Clase, texto: str, etiqueta: s
             salidas[paso.clave] = limpiar_ligero(leer(ruta), prosa)
             if paso.clave == "6_agente_principal" and os.path.exists(ruta_terminos):
                 salidas["terminos"] = leer(ruta_terminos).strip()
-            log(f"{prefijo} paso {k}/8 {paso.nombre}: recuperado de Drive")
+            detalle(f"{prefijo} paso {k}/{TOTAL_PASOS} {paso.nombre}: recuperado de Drive")
             continue
         rehacer = True              # si se rehace un paso, los siguientes tambien
-        log(f"{prefijo} paso {k}/8 {paso.nombre}..." + (" (con busqueda web)" if paso.web and api.web else ""))
+        detalle(f"{prefijo} paso {k}/{TOTAL_PASOS} {paso.nombre}..."
+                + (" (con busqueda web)" if paso.web and api.web else ""))
         t0 = time.time()
 
         def armar(nota, paso=paso):
@@ -976,12 +1047,11 @@ def procesar_bloque(api: Api, instr: dict, clase: Clase, texto: str, etiqueta: s
                         pass
                 salidas["terminos"] = extraer_entre(res.crudo, "terminos")[0] \
                     if "<terminos>" in res.crudo.lower() else ""
-            elif paso.clave == "7_format_enforcer":
+            elif paso.clave in MINIMO_REVISOR:
+                # cada revisor trabaja sobre el texto del paso anterior y no deberia vaciarlo
+                anterior_clave = PASOS[k - 2].clave
                 resultado, guardar = no_resumir(api, paso, armar, prefijo, resultado,
-                                                salidas["6_agente_principal"], 0.4)
-            elif paso.clave == "8_vocabulary_checker":
-                resultado, guardar = no_resumir(api, paso, armar, prefijo, resultado,
-                                                salidas["7_format_enforcer"], 0.6)
+                                                salidas[anterior_clave], MINIMO_REVISOR[paso.clave])
         except Bloqueado as e:
             guardar = False         # un fallo nunca se guarda: la proxima vez se reintenta
             if k <= 5:
@@ -1000,17 +1070,18 @@ def procesar_bloque(api: Api, instr: dict, clase: Clase, texto: str, etiqueta: s
                 escribir(ruta_terminos, salidas["terminos"])
         else:
             completo = False
-        log(f"{prefijo}   listo en {int(time.time() - t0)} s ({_miles(len(resultado))} caracteres)")
+        detalle(f"{prefijo}   listo en {int(time.time() - t0)} s ({_miles(len(resultado))} caracteres)")
 
-    if hasta < 8:
+    if hasta < TOTAL_PASOS:
         return "", ""
     final = salidas["8_vocabulary_checker"]
     if lineas_de_lista(final) > 2:
         log(f"{prefijo} quedaron listas; pasada extra del Format Enforcer...")
-        extra = PASOS[6]
+        extra = paso_por_clave("7_format_enforcer")
+        entrada = extra.entradas[-1]
         try:
             otro = ejecutar_paso(api, extra, lambda nota: armar_prompt(
-                extra, instr, {"6_agente_principal": final}, clase, i, n, nota), prefijo).texto
+                extra, instr, {entrada: final}, clase, i, n, nota), prefijo).texto
             if len(otro) >= 0.6 * len(final):
                 final = otro
         except Bloqueado:
@@ -1126,17 +1197,16 @@ def explicar_clase(api: Api, cfg: Config, instr: dict, clase: Clase, transcripci
     n = len(bloques)
 
     # Fase 1: la investigacion (pasos 1-3) no depende de las otras partes: va en paralelo.
-    log(f"{pre} {_miles(len(transcripcion))} caracteres -> {n} partes de unos 20 minutos.\n"
-        f"{pre} Fase 1: investigacion (Deep Researcher, Concept Analyzer, Contextualizer) de las "
-        f"{n} partes, {max(1, min(cfg.paralelo, n))} a la vez.\n"
-        f"{pre} Lo que entrega cada subagente se guarda en: {dir_pasos}")
+    log(f"{pre} {n} parte(s) de unos 20 minutos. Investigando (Deep Researcher, Concept Analyzer, "
+        f"Contextualizer)...")
+    detalle(f"{pre} Lo que entrega cada subagente se guarda en: {dir_pasos}")
     en_paralelo(lambda ib: procesar_bloque(api, instr, clase, ib[1], f"b{ib[0]:02d}", ib[0], n,
                                            dir_pasos, hasta=3),
                 list(enumerate(bloques, 1)), cfg.paralelo)
 
     # Fase 2: analogias, jerga y redaccion, EN ORDEN: cada parte sabe que conceptos ya se
     # explicaron y como termino la anterior, para no repetir definiciones.
-    log(f"{pre} Fase 2: analogias, jerga y redaccion, parte por parte en orden.")
+    log(f"{pre} Redactando parte por parte, en orden (analogias, jerga, redaccion y revisiones)...")
     partes, memorias = [], []
     for i, b in enumerate(bloques, 1):
         if PARAR.is_set():
@@ -1146,14 +1216,14 @@ def explicar_clase(api: Api, cfg: Config, instr: dict, clase: Clase, transcripci
             memoria=unir_memoria(memorias), anterior=cola(partes[-1]) if partes else "")
         partes.append(texto)
         memorias.append(terminos)
-        log(f"{pre} parte {i}/{n} terminada")
+        log(f"{pre} parte {i}/{n} lista: {legibilidad(texto)}")
 
     explicacion = "\n\n".join(p.strip() for p in partes if p.strip()) + "\n"
     escribir(clase.ruta_explicacion, explicacion)
     plan["explicacion_metodo"] = METODO
     escribir(os.path.join(dir_pasos, "plan.json"), json.dumps(plan, indent=2))
-    log(f"{pre} explicacion guardada: {os.path.basename(clase.ruta_explicacion)} "
-        f"({_miles(len(explicacion))} caracteres)")
+    log(f"{pre} explicacion guardada ({_miles(len(explicacion))} caracteres): "
+        f"{os.path.basename(clase.ruta_explicacion)}\n{pre} lectura: {legibilidad(explicacion)}")
     return explicacion
 
 
@@ -1255,7 +1325,7 @@ def orden_natural(s: str) -> list:
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s)]
 
 
-def buscar_clases(carpeta: str, solo_curso: str = "") -> list[Clase]:
+def buscar_clases(carpeta: str, solo_curso: str = "", curso: str = "") -> list[Clase]:
     clases = []
     for raiz, dirs, archivos in os.walk(carpeta):
         dirs[:] = sorted((d for d in dirs if not d.startswith((".", "_"))), key=orden_natural)
@@ -1268,8 +1338,11 @@ def buscar_clases(carpeta: str, solo_curso: str = "") -> list[Clase]:
             clave = os.path.relpath(ruta, carpeta)
             if solo_curso and solo_curso.lower() not in clave.lower():
                 continue
-            curso = os.path.relpath(raiz, carpeta)
-            clases.append(Clase(ruta, clave, "" if curso == "." else curso, nombre[:-4]))
+            carpeta_curso = os.path.relpath(raiz, carpeta)
+            carpeta_curso = "" if carpeta_curso == "." else carpeta_curso
+            if curso and carpeta_curso != curso:
+                continue
+            clases.append(Clase(ruta, clave, carpeta_curso, nombre[:-4]))
     return clases
 
 
@@ -1324,6 +1397,18 @@ def clase_completa(cfg: Config, clase: Clase, reg: Registro) -> bool:
     return not cfg.crear_audio or e.get("audio") == "creado"
 
 
+def lista_cursos(cfg: Config) -> list[tuple[str, int, int]]:
+    """(carpeta del curso, clases, clases terminadas), para elegir un curso en el notebook."""
+    cfg.carpeta = resolver_carpeta(cfg.carpeta)
+    reg = Registro(os.path.join(cfg.carpeta, REGISTRO))
+    cursos: dict[str, list[int]] = {}
+    for c in buscar_clases(cfg.carpeta):
+        cuenta = cursos.setdefault(c.curso, [0, 0])
+        cuenta[0] += 1
+        cuenta[1] += clase_completa(cfg, c, reg)
+    return [(k, v[0], v[1]) for k, v in sorted(cursos.items(), key=lambda kv: orden_natural(kv[0]))]
+
+
 def resolver_carpeta(carpeta: str) -> str:
     """Acepta 'clases' aunque en Drive se llame 'Clases' (y al reves)."""
     carpeta = carpeta.rstrip("/")
@@ -1344,13 +1429,19 @@ def ejecutar(cfg: Config) -> int:
     api.preparar()
     instr = cargar_instrucciones(cfg)
     reg = Registro(os.path.join(cfg.carpeta, REGISTRO))
-    clases = buscar_clases(cfg.carpeta, cfg.solo_curso)
+    clases = buscar_clases(cfg.carpeta, cfg.solo_curso, cfg.curso)
+    if cfg.curso:
+        print(f"\nCurso: {cfg.curso}")
+        if not clases:
+            print("No encontre transcripciones .txt en esa carpeta. Revisa el nombre del curso.")
+            return 1
     pendientes = [c for c in clases if not clase_completa(cfg, c, reg)]
     print(f"\nClases encontradas: {len(clases)}   completas: {len(clases) - len(pendientes)}   "
           f"pendientes: {len(pendientes)}")
     if cfg.max_clases:
         print(f"En esta ejecucion se procesan hasta {cfg.max_clases}.")
 
+    DETALLE.set() if cfg.detalle else DETALLE.clear()
     lote = pendientes[:cfg.max_clases] if cfg.max_clases else pendientes
     hechas = len(lote)
     est, fallos, lock_cuadernos = EstadoAudio(), [], threading.Lock()
@@ -1418,7 +1509,7 @@ def probar(cfg: Config) -> int:
     except (ApiError, RuntimeError) as e:
         print(f"   FALLO: {e}")
         return 1
-    clases = buscar_clases(cfg.carpeta, cfg.solo_curso)
+    clases = buscar_clases(cfg.carpeta, cfg.solo_curso, cfg.curso)
     print(f"3) Carpeta {cfg.carpeta}: {len(clases)} transcripciones .txt")
     for c in clases[:5]:
         print(f"   {c.clave}")
@@ -1434,7 +1525,7 @@ def limpiar(cfg: Config, borrar: bool) -> int:
     api = Api(cfg)
     api.preparar()
     reg = Registro(os.path.join(cfg.carpeta, REGISTRO))
-    clases = buscar_clases(cfg.carpeta, cfg.solo_curso)
+    clases = buscar_clases(cfg.carpeta, cfg.solo_curso, cfg.curso)
     titulos = {c.titulo for c in clases} | {c.base for c in clases}
     actuales = {e.get("notebook_id") for e in reg.datos.values() if e.get("notebook_id")}
     reemplazados = {i for e in reg.datos.values() for i in e.get("cuadernos_reemplazados", [])}
@@ -1476,6 +1567,9 @@ def main(argv=None) -> int:
     p.add_argument("--modelo", default="", help="modelo del asistente (vacio = el de tu app)")
     p.add_argument("--max-clases", type=int, default=1, help="0 = todas")
     p.add_argument("--solo-curso", default="", help="solo rutas que contengan este texto")
+    p.add_argument("--curso", default="", help="nombre exacto de la carpeta del curso")
+    p.add_argument("--cursos", action="store_true", help="lista los cursos y cuantas clases faltan")
+    p.add_argument("--detalle", action="store_true", help="muestra cada paso de cada parte")
     p.add_argument("--bloque-chars", type=int, default=15000)
     p.add_argument("--paralelo", type=int, default=3,
                    help="partes de una clase investigadas a la vez (fase 1)")
@@ -1495,12 +1589,17 @@ def main(argv=None) -> int:
 
     cfg = Config(carpeta=a.carpeta, project_id=a.project_id, project_number=a.project_number,
                  location=a.location, engine_id=a.engine_id, modelo=a.modelo,
-                 max_clases=a.max_clases, solo_curso=a.solo_curso, bloque_chars=a.bloque_chars,
+                 max_clases=a.max_clases, solo_curso=a.solo_curso, curso=a.curso,
+                 detalle=a.detalle, bloque_chars=a.bloque_chars,
                  paralelo=a.paralelo, clases_a_la_vez=a.clases_a_la_vez,
                  busqueda_web=not a.sin_busqueda_web,
                  borrar_chats=not a.conservar_chats, crear_cuaderno=not a.sin_cuaderno,
                  crear_audio=not (a.sin_audio or a.sin_cuaderno), idioma_audio=a.idioma_audio,
                  enfoque_audio=a.enfoque_audio, rehacer=a.rehacer)
+    if a.cursos:
+        for nombre, total, hechas in lista_cursos(cfg):
+            print(f"{hechas:>3}/{total:<3} {nombre or '(sin carpeta de curso)'}")
+        return 0
     if a.probar:
         return probar(cfg)
     if a.limpiar:

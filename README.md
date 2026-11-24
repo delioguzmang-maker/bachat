@@ -153,7 +153,10 @@ Usa las transcripciones `.txt` (en inglés) que deja `dce_downloader.py`. Para c
 1. Divide la transcripción en partes de ~15.000 caracteres (unos 20 minutos de clase) y pasa cada
    parte por los 7 subagentes del *Topic Simplifier Agent* y por el agente principal, **en orden**:
    Deep Researcher → Concept Analyzer → Contextualizer → Analogy Creator → Jargon Buster →
-   agente principal (redacta) → Format Enforcer → Vocabulary Checker.
+   agente principal (redacta) → Jargon Buster (revisa que no queden palabras técnicas sin explicar) →
+   Format Enforcer (oraciones cortas que tengan sentido completo) → Vocabulary Checker.
+   Las reglas de estilo que diste (párrafos fluidos, oraciones cortas, cada término técnico traducido al
+   lenguaje cotidiano con una analogía y para qué sirve) van en cada paso de redacción.
    La investigación (pasos 1–3) de todas las partes va en paralelo. La redacción (pasos 4–8) va parte por
    parte, en orden: cada parte recibe la lista de conceptos ya explicados y el final de la anterior, así
    no se repiten definiciones ni analogías. El Analogy Creator recibe la transcripción y la investigación,
@@ -165,8 +168,10 @@ Usa las transcripciones `.txt` (en inglés) que deja `dce_downloader.py`. Para c
    con 2 fuentes (transcripción + explicación) y pide el Audio Overview en español.
 
 - **Notebook:** [`simplificador_colab.ipynb`](simplificador_colab.ipynb). Está en español; ejecuta las
-  celdas de arriba hacia abajo. Necesita dos inicios de sesión: Drive (la cuenta de las clases) y
-  `gcloud auth login` (la cuenta de Gemini Enterprise). El proyecto, la ubicación y la app se detectan solos.
+  celdas de arriba hacia abajo. Todas las celdas son formularios con el código oculto. Necesita dos inicios
+  de sesión: Drive (la cuenta de las clases) y `gcloud auth login` (la cuenta de Gemini Enterprise).
+  El curso se elige en un menú que muestra cuántas clases están terminadas en cada uno. El proyecto, la
+  ubicación y la app se detectan solos; solo se pueden cambiar en "Opciones avanzadas".
 - **Script:** `simplificador_clases.py`.
 
 **Por qué no se llama directamente al agente del diseñador de agentes:** por la API, el agente
@@ -195,6 +200,8 @@ Hay un solo audio por cuaderno, y no se puede descargar por la API: aparece en e
 - **Versiones:** si una explicación se hizo con una versión anterior del método, se rehace sola
   (la investigación de los pasos 1–3 se reutiliza). En `instrucciones_agentes.json` se respetan los textos que
   editaste; los demás se actualizan con el script.
+- **Mensajes:** por defecto solo se ve el progreso: cada parte lista con una medida de lectura
+  (palabras por oración y % de palabras largas). Con `--detalle` se ve cada paso de cada subagente.
 - **Velocidad:** `--paralelo` (partes investigadas a la vez, 3 por defecto) y `--clases-a-la-vez`.
   Al detener la celda, se para de verdad y conserva lo hecho.
 
@@ -202,7 +209,9 @@ Hay un solo audio por cuaderno, y no se puede descargar por la API: aparece en e
 python simplificador_clases.py --carpeta /content/drive/MyDrive/Clases --probar        # comprobar conexión
 python simplificador_clases.py --carpeta /content/drive/MyDrive/Clases --max-clases 1  # una clase de prueba
 python simplificador_clases.py --carpeta /content/drive/MyDrive/Clases --max-clases 0  # todas
-python simplificador_clases.py --carpeta ... --solo-curso "HIST E-1900" --sin-audio
+python simplificador_clases.py --carpeta ... --cursos                                    # cursos y clases terminadas
+python simplificador_clases.py --carpeta ... --curso "RELI E-1701 - Mindfulness, Meaning, and Resilience" --max-clases 0
+python simplificador_clases.py --carpeta ... --solo-curso "HIST E-1900" --sin-audio --detalle
 python simplificador_clases.py --carpeta ... --limpiar --borrar
 ```
 
